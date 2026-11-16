@@ -11,7 +11,7 @@ From drives to a network that drives (a project lives in runs/drive):
     ./drive.sh label                   label drives that came without a plan (ROS 2, a person)
     ./drive.sh validate                check the dataset
     ./drive.sh browse                  look at frames with their labels drawn on the road
-    ./drive.sh train v1                train a network (needs PyTorch: make train)
+    ./drive.sh train v1                train a network (needs PyTorch: make train, or make setup)
     ./drive.sh evaluate v1             drive it on every track
     ./drive.sh sim --policy cnn --checkpoint v1 --show
     ./drive.sh status                  what there is, and the next step
