@@ -1,0 +1,31 @@
+# The container for drive/: simulation, data, training and ROS 2.   make help
+# Needs Docker with the NVIDIA container toolkit.
+
+services:
+  drive:
+    build: ./docker
+    image: vla-drive:humble-torch2.5.1
+    # As the host user, so files written to runs/ and ros/ are yours, not root's.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # The NVIDIA runtime gives PyTorch the GPU and rviz2 its OpenGL.
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY:-}
+      - NO_AT_BRIDGE=1          # GTK: do not look for the desktop's accessibility bus
+      # ROS 2 nodes find each other on this machine only, not on the network.
+      - ROS_LOCALHOST_ONLY=1
+    # Each `make` target is its own container. On the host's network and IPC namespace
+    # their ROS 2 nodes see one another, and windows can use X11 shared memory.
+    network_mode: host
+    ipc: host
+    # The desktop's own GPU (the Intel one on a laptop), for OpenGL windows: rqt, rviz2.
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - .:/work
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    working_dir: /work
+    stdin_open: true
+    tty: true

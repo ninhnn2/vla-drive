@@ -1,0 +1,16 @@
+"""From drives to a network that drives, one module per stage.
+
+    collect    the teacher drives in the simulator, with disturbed steering -> episodes/
+    label      a plan for every frame: the teacher's, or the actions that followed
+    validate   is the dataset complete, consistent and varied enough?
+    browse     look at the frames with their labels drawn on the road
+    train      fit the network -> models/<version>.pt
+    evaluate   drive the models on every track -> reports/
+    status     what the project holds, and the next step
+
+A stage is a module with `add_parser(subparsers)` and `run(project, args)`; adding one
+is writing that module and listing it here. Files are laid out by `project.py`.
+"""
+from . import browse, collect, evaluate, label, status, train, validate
+
+STAGES = [collect, label, validate, browse, train, evaluate, status]
