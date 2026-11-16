@@ -30,12 +30,15 @@ def augment(images, states, plans, generator):
 
 
 def pick_device(log=print) -> str:
-    """cuda when it works, else cpu, saying why when the GPU is there but will not start."""
+    """cuda when it works, else mps (a Mac's GPU), else cpu, saying why when an NVIDIA GPU is
+    there but will not start."""
     import torch
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         if torch.cuda.is_available():
             return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
     if any("unknown error" in str(w.message) for w in caught):
         log("CUDA would not start. After a suspend the driver's UVM module needs reloading:\n"
             "  sudo rmmod nvidia_uvm && sudo modprobe nvidia_uvm\ntraining on the CPU instead")
@@ -108,7 +111,7 @@ def add_parser(sub):
     add_project_argument(p)
     p.add_argument("version", help="a name for the model, e.g. v1; evaluate and sim refer to it by this")
     p.add_argument("--epochs", type=int, default=15)
-    p.add_argument("--device", help="cuda or cpu (default: cuda when it works)")
+    p.add_argument("--device", help="cuda, mps or cpu (default: cuda when it works, else a Mac's GPU)")
     p.add_argument("--seed", type=int, default=0)
 
 
@@ -116,7 +119,8 @@ def run(project: Project, args) -> int:
     try:
         import torch.nn  # noqa: F401
     except ImportError as error:
-        raise ValueError(f"training needs PyTorch ({error}); use the container: make train") from error
+        raise ValueError(f"training needs PyTorch ({error}); make setup (a .venv, on a Mac), or use the container: "
+                         "make train") from error
     out = project.model(args.version)
     if out.exists():
         raise ValueError(f"{out} exists; a trained model is not replaced, choose another version")

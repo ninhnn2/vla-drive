@@ -31,8 +31,15 @@ make test
 make help                      # every target
 ```
 
-`./drive.sh` also runs straight on a PC that has numpy and OpenCV; only training and
-the learned policy need the container's PyTorch.
+On a Mac (Apple Silicon) the same targets run `drive/` natively instead, in a `.venv`
+that `make setup` makes with [uv](https://docs.astral.sh/uv/), and training uses the
+Mac's GPU through PyTorch's MPS backend. Docker on a Mac has no GPU, so the container
+([`compose.mac.yml`](../docker/compose.mac.yml)) is only for ROS 2: arm64, PyTorch for the
+CPU, windows on XQuartz. `NATIVE=0` runs `drive/` in it too; `NATIVE=1` uses `.venv` on
+Linux.
+
+`./drive.sh` also runs straight on a PC that has numpy and OpenCV, and picks up `.venv`
+when there is one; only training and the learned policy need PyTorch.
 
 ```bash
 ./drive.sh sim --latency-ms 400 --max-plan-age-ms 1500 --video runs/slow.mp4
@@ -116,7 +123,7 @@ ROS 2 ───┘                                      ▲          │
 make collect                # the teacher drives 40 times in the simulator: 12 000 frames, ~35 s
 make validate               # is the dataset complete, consistent, varied enough?
 make browse                 # every frame, with its label drawn on the road
-make train V=v1             # ~20 s on an RTX 4060
+make train V=v1             # ~20 s on an RTX 4060, ~2 min on an M3 (MPS), ~10 min on its CPU
 make evaluate V=v1          # drive it on every track, both ways
 make sim ARGS='--policy cnn --checkpoint v1 --track trefoil'
 make status                 # what the project holds, and the next step
@@ -221,7 +228,8 @@ recorder and the training pipeline do not change. Neither exists yet.
 
 Each `make` target is its own container on the host's network, so the nodes find one
 another; `ROS_LOCALHOST_ONLY=1` keeps them off the LAN. Windows (OpenCV, rqt, rviz2)
-open on the host's X server.
+open on the host's X server; on a Mac, on XQuartz, which the containers reach over TCP
+(`make gui` checks that it lets them).
 
 ## From here to a car
 

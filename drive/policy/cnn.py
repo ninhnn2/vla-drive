@@ -17,7 +17,8 @@ class CnnPolicy(Policy):
         try:
             from ..learn import model
         except ImportError as error:
-            raise ValueError(f"the cnn policy needs PyTorch ({error}); use the container: make shell") from error
+            raise ValueError(f"the cnn policy needs PyTorch ({error}); make setup (a .venv, on a Mac), "
+                             "or use the container: make shell") from error
         if not Path(checkpoint).is_file():
             raise ValueError(f"no checkpoint at {checkpoint}; train one with ./drive.sh train")
         self._predict = model.predict
