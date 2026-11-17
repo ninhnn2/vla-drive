@@ -237,18 +237,19 @@ open on the host's X server.
    and obeys `/drive/cmd`, as [`sim_node.py`](../ros/src/drive_ros/drive_ros/sim_node.py)
    does for the simulated one.
 2. **Data.** Drive by hand with the recorder running, then label and validate. For a
-   VLA, convert the episodes to a LeRobotDataset: state `[speed, steer]`, action
-   `[steer, throttle]`.
+   VLA, `python -m drive export` (in an environment with LeRobot) writes the episodes
+   as a LeRobotDataset: state `[speed, steer]`, action `[steer, throttle]`.
 3. **Fine-tune and export.** Fine-tune SmolVLA with LeRobot, then, with
    [jetson-orin-nano-vla](https://github.com/eetmie/jetson-orin-nano-vla), `./export.sh`
    the checkpoint on the PC and `./run.sh` the bundle on the Jetson to get its real latency.
 4. **Policy.** Load the bundle's backend and wrap it:
    `BackendPolicy(backend, chunk_size=50, noise_width=32, chunk_dt_s=1 / fps)` in a
-   `ThreadedWorker`. This adapter is tested against a stub backend only; it has not
-   run on a Jetson.
+   `ThreadedWorker`. On a PC, `--policy vla --checkpoint <lerobot checkpoint>` does this
+   with the PyTorch model (`drive/policy/lerobot_backend.py`); a TensorRT backend has
+   not been wired in, and nothing has run on a Jetson.
 
-Not here yet: the real platform, a CARLA bridge, the LeRobot conversion, a fine-tuned
-driving checkpoint. Driving by hand with `teleop` has been started and seen to open its
+Not here yet: the real platform, a CARLA bridge, a VLA on the Jetson. (A SmolVLA
+fine-tuned on the episodes drives the simulator on a PC: docs/study, Lab 15.) Driving by hand with `teleop` has been started and seen to open its
 window, not driven for a recording. The simulator is flat and kinematic: no slip, no camera noise or exposure,
 obstacles are painted on the ground. Treat its numbers as how the loop behaves, not as
 how a car will.
