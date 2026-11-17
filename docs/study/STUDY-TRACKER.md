@@ -39,6 +39,7 @@ you have read it.
 | 14 | [Jetson deployment](14-jetson-deployment.md) | | ☐ | ☐ | ☐ | ☐ | ☐ | |
 | 15 | [Hands-on labs](15-hands-on-labs.md) | | ☐ | n/a | see below | n/a | ☐ | |
 | 16 | [Experiments](16-experiments.md) | | ☐ | n/a | see below | n/a | ☐ | |
+| 17 | [Debugging the model](17-debugging-the-model.md) | | ☐ | ☐ | ☐ | ☐ | ☐ | |
 
 ## Concepts
 
