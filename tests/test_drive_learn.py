@@ -35,7 +35,7 @@ try:
 except ImportError:                      # only an environment set up for VLA fine-tuning has it
     lerobot = None
 
-needs_torch = unittest.skipIf(torch is None, "PyTorch is not installed (use the container: make test)")
+needs_torch = unittest.skipIf(torch is None, "PyTorch is not installed (make setup, or use the container: make test)")
 
 
 def quiet(*a, **k):
@@ -443,6 +443,19 @@ class LearnTests(unittest.TestCase):
         np.testing.assert_allclose(x[~flipped][:, 0, 0, 0], (images[~flipped][:, 0, 0, 0] * gain[~flipped]), rtol=1e-5)
         np.testing.assert_allclose(x[flipped][:, 0, 0, 0], (images[flipped][:, 0, 2, 0] * gain[flipped]), rtol=1e-5)
         self.assertTrue(((gain >= 0.8) & (gain <= 1.2)).all())
+
+    @unittest.skipUnless(torch is not None and torch.backends.mps.is_available(), "no Mac GPU (MPS)")
+    def test_mps_reads_a_slice_of_the_batch(self):
+        # Validation runs the held-out frames 512 at a time. On MPS, permuting such a uint8
+        # slice and then casting it read the batch from frame 0: a wrong validation score.
+        from drive.learn.model import ChunkNet
+        model = ChunkNet(PLAN_STEPS).eval()
+        images = torch.randint(0, 255, (6, 96, 128, 3), dtype=torch.uint8)
+        states = torch.randn(6, 2)
+        with torch.no_grad():
+            expected = model(images[3:], states[3:])
+            out = model.to("mps")(images.to("mps")[3:], states.to("mps")[3:]).cpu()
+        torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-5)
 
     def test_train_then_drive(self):
         from drive.learn.train import train

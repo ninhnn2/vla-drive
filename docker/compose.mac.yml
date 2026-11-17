@@ -1,0 +1,25 @@
+# docker-compose.yml on a Mac (Apple Silicon), laid over it by the Makefile:
+#   docker compose -f docker-compose.yml -f docker/compose.mac.yml ...
+# Docker on a Mac runs Linux in a VM with no GPU, so this image is arm64 and CPU-only;
+# drive/ itself runs faster natively (make setup), and the container is for ROS 2.
+# Windows go to XQuartz over TCP: `make gui` checks it is set up.
+
+services:
+  drive:
+    build:
+      args:
+        BASE: ros:humble-perception
+        APT_PACKAGES: ros-humble-rqt-image-view python3-opencv
+        TORCH_INDEX: https://download.pytorch.org/whl/cpu
+    image: vla-drive:humble-torch2.5.1-cpu
+    runtime: !reset null
+    devices: !reset []
+    environment:
+      - DISPLAY=host.docker.internal:0
+      - QT_X11_NO_MITSHM=1      # X11 shared memory does not cross the VM
+    # Windows print "libGL error: No matching fbConfigs or visuals found": XQuartz offers
+    # no OpenGL to remote clients. OpenCV and rqt do without; this image has no rviz2.
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes: !override
+      - .:/work
