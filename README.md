@@ -81,9 +81,12 @@ runs/           datasets, models and reports (not in git)
 
 ## Not here yet
 
-A real car, a CARLA bridge, conversion of the episodes to a LeRobot dataset, and a
-fine-tuned VLA. The simulator is flat and kinematic, so its numbers describe how the
-control loop behaves, not how a car will.
+A real car, a CARLA bridge, and a VLA on the Jetson. A SmolVLA fine-tuned on the
+episodes drives the simulated car in PyTorch on a PC (`python -m drive export`, then
+LeRobot's `lerobot-train`, then `--policy vla`; see
+[docs/study/15-hands-on-labs.md](docs/study/15-hands-on-labs.md), Lab 15), but it has not
+been exported to TensorRT or run on a board. The simulator is flat and kinematic, so
+its numbers describe how the control loop behaves, not how a car will.
 
 ## Thanks
 
