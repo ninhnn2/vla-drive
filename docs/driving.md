@@ -122,6 +122,14 @@ make sim ARGS='--policy cnn --checkpoint v1 --track trefoil'
 make status                 # what the project holds, and the next step
 ```
 
+`collect` runs as fast as the PC allows and shows nothing. To watch the teacher drive
+while it records, in real time: `make collect ARGS='--project runs/demo --episodes 2 --show'`
+(`--video FILE` writes the same view; neither changes what is recorded). To look at
+some episodes only: `make browse ARGS="--match 'sim2-*'"`.
+
+`--seed` decides every drive: the same seed under another `--name` records the same
+drives again. More data needs a new seed too: `make collect ARGS='--name sim2 --seed 100'`.
+
 A project is one directory, `runs/drive` unless `--project` says otherwise:
 
 ```

@@ -97,6 +97,18 @@ class CollectTests(unittest.TestCase):
             collect(Path(d) / "a", episodes=1, duration_s=1.0, name="more", log=quiet)
             self.assertEqual(sorted(p.name for p in (Path(d) / "a").iterdir()), ["more-000", "sim-000"])
 
+    def test_watching_does_not_change_the_recording(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            collect(d / "plain", episodes=2, duration_s=1.0, seed=3, log=quiet)
+            done = collect(d / "watched", episodes=2, duration_s=1.0, seed=3, log=quiet, video=d / "w.mp4")
+            self.assertEqual((done["episodes"], done["frames"], done["stopped"]), (2, 20, False))
+            for episode in ("sim-000", "sim-001"):
+                a, b = (np.load(d / kind / episode / "episode.npz") for kind in ("plain", "watched"))
+                for key in ("images", "states", "actions"):
+                    np.testing.assert_array_equal(a[key], b[key])
+            self.assertGreater((d / "w.mp4").stat().st_size, 20_000)       # 2 s at 25 frames a second
+
     def test_without_noise_the_applied_action_is_the_plan(self):
         with tempfile.TemporaryDirectory() as d:
             collect(Path(d) / "data", episodes=1, duration_s=2.0, steer_noise=0.0, log=quiet)
@@ -264,6 +276,9 @@ class BrowseTests(unittest.TestCase):
             self.assertEqual(browse(d / "data", show=False, video=d / "b.mp4"), 20)
             self.assertEqual(browse(d / "data", show=False, video=d / "c.mp4", every=4), 5)
             self.assertGreater((d / "b.mp4").stat().st_size, 20_000)
+            self.assertEqual(browse(d / "data", show=False, video=d / "d.mp4", match="sim-001"), 10)
+            with self.assertRaisesRegex(ValueError, "named 'ros-\\*'"):
+                browse(d / "data", show=False, video=d / "e.mp4", match="ros-*")
 
 
 class EvaluateTests(unittest.TestCase):

@@ -20,6 +20,8 @@ help:
 	@echo "container   make build | shell | test"
 	@echo "simulator   make sim [ARGS='--policy cnn --checkpoint v1 --track trefoil']"
 	@echo "data        make collect | label | validate | browse | status"
+	@echo "            watch it:  make collect ARGS='--project runs/demo --episodes 2 --show'"
+	@echo "                       make browse ARGS=\"--match 'sim2-*'\""
 	@echo "model       make train V=v1 | evaluate V=v1"
 	@echo "ROS 2       make ros-build, then each in its own terminal:"
 	@echo "              make ros-sim [TRACK=trefoil]         the simulated car, with a window"
@@ -45,7 +47,10 @@ gui:
 sim: gui
 	$(RUN) ./drive.sh sim --show $(ARGS)
 
-collect label validate status:
+collect: gui
+	$(RUN) ./drive.sh collect $(ARGS)
+
+label validate status:
 	$(RUN) ./drive.sh $@ $(ARGS)
 
 browse: gui
