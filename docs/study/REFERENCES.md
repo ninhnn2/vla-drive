@@ -118,5 +118,5 @@ Each entry says which chapters it supports.
 |---|---|
 | [`README.md`](../../README.md) | What the project is, and what is not there yet |
 | [`docs/driving.md`](../driving.md) | How to run everything; the measurements quoted here as *repo* |
-| [`tests/`](../../tests) | The executable specification: 81 tests |
+| [`tests/`](../../tests) | The executable specification: 82 tests |
 | `runs/drive/reports/*.json`, `runs/drive/models/*.json` | Evaluation and training reports (local, not in git) |

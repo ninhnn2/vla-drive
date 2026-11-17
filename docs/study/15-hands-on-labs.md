@@ -7,7 +7,7 @@ Fifteen exercises, in order of dependence. Each takes 15 to 45 minutes, except L
 
 ```bash
 make build        # once: the container (about 9 GB). Needs Docker and the NVIDIA container toolkit
-make test         # 81 tests should pass
+make test         # 82 tests should pass
 ```
 
 - `make <target>` runs in the container. Targets that open a window (`sim`, `browse`,
@@ -47,8 +47,23 @@ pure-pursuit on peanut, 100.0 ms per inference (300 inferences), latency compens
 ```
 
 **Observe.** Left: the car's camera. Right: the map, the car, and in cyan the plan in
-the current chunk. Bottom: "policy in control" in green, or the supervisor's reasons
-in red. Press `e` and watch the line change.
+the current chunk. Under them: "policy in control" in green, or the supervisor's
+reasons in red. Press `e` and watch the line change.
+
+The **debug panel** at the bottom shows what the policy outputs
+([`Hud.debug_panel`](../../drive/viewer.py#L114)):
+
+- the top line: the action the chunk gives for *now* (`model:`) and what the
+  supervisor sent to the motors (`-> motors:`), in red with its reasons when they differ;
+- left: the whole chunk in use, steer in cyan and throttle in orange, against time
+  since its observation. The grey band is the part skipped because it was meant for
+  the time the policy spent computing; the white line is the action being played;
+- right: the last 5 s. Thick lines are what the model asked for, thin lines what the
+  motors got; red ticks mark the ticks the supervisor overrode.
+
+To keep every tick for later, add `--log runs/lab1/actions.csv`: one row per 20 ms tick
+with the chunk's action, the motors' action, the plan's age and the supervisor's
+reasons.
 
 **Questions.**
 1. Why 300 inferences in 30 s?
@@ -557,6 +572,14 @@ PyTorch runs on driver 535 (CUDA 12.2) here.
 The extras are `smolvla,dataset,training`. The Colab notebook writes `train`, which
 does not exist in LeRobot 0.5.2.
 
+LeRobot installs `opencv-python-headless`, which cannot open a window. For `--show`
+(Step 3), swap it for the windowed build of the same version, once:
+
+```bash
+uv pip uninstall --python .venv opencv-python-headless
+uv pip install --python .venv "opencv-python==4.13.0.92"     # the version the headless one was
+```
+
 **Every later shell** needs the cache location again, or the model is downloaded to
 `/` a second time:
 
@@ -644,8 +667,15 @@ config, and the pre/post-processors with this dataset's normalisation statistics
 ```bash
 $V -m drive sim --policy vla --checkpoint smolvla-v1 --latency-ms 125 \
    --video runs/drive/vla/smolvla-v1-peanut.mp4
-$V -m drive sim --policy vla --checkpoint smolvla-v1 --latency-ms 125 --show   # a window, real time
+$V -m drive sim --policy vla --checkpoint smolvla-v1 --latency-ms 0 --show \
+   --log runs/drive/vla/smolvla-v1-actions.csv                                   # a window, real time
 ```
+
+With `--show` inference runs on a real thread, so `--latency-ms 0` adds nothing and
+the latency is the model's own (*measured* 150–190 ms with the window open). The
+debug panel under the HUD (Lab 1) shows each 16-action chunk SmolVLA outputs, the
+part of it skipped while it was computed, and the model's command against the
+motors'. `--log` writes the same per tick to CSV.
 
 `--checkpoint smolvla-v1` is found under `runs/drive/vla/`; a path to any
 `pretrained_model` directory works too. `--latency-ms 125` because that is what one

@@ -43,6 +43,16 @@ class ChunkExecutor:
                 action = (1.0 - fade) * old + fade * action
         return action
 
+    @property
+    def origin(self) -> float:
+        """The time `chunk.actions[0]` is played at: its observation's time, or its arrival without compensation."""
+        return self._origin
+
+    @property
+    def arrived(self) -> float:
+        """When the current chunk arrived."""
+        return self._swapped
+
     def age_s(self, now: float) -> float:
         """Seconds since the observation the current plan was made from."""
         return math.inf if self.chunk is None else now - self.chunk.t_obs

@@ -138,7 +138,7 @@ proportional brake command there.
 [`estop(engaged=True)`](../../drive/safety.py#L30) sets a flag that is checked first
 and holds until released (`SafetyTests.test_estop_holds_until_released`).
 
-- **Simulator**: the `e` key in the HUD toggles it ([`cli.py`](../../drive/cli.py#L69)).
+- **Simulator**: the `e` key in the HUD toggles it ([`cli.py`](../../drive/cli.py#L70)).
 - **ROS 2**: **no topic, service or parameter engages it.** The driver node creates the
   supervisor but exposes no way to call `estop()`. An e-stop input is a gap to close
   before a real car ([chapter 14](14-jetson-deployment.md)).

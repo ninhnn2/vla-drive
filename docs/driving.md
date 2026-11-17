@@ -37,7 +37,12 @@ the learned policy need the container's PyTorch.
 ```bash
 ./drive.sh sim --latency-ms 400 --max-plan-age-ms 1500 --video runs/slow.mp4
 ./drive.sh sweep                               # tracking error against inference latency
+./drive.sh sim --log runs/actions.csv          # every tick: the policy's action, the motors', and why
 ```
+
+Under the HUD a debug panel shows what the policy is outputting: the chunk in use
+(with the part skipped for latency and the action being played) and the last 5 s of
+the model's commands against what reached the motors.
 
 Tracks: `--track peanut` (default), `oval`, `trefoil`; `--reverse` drives one clockwise.
 

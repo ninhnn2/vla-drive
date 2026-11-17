@@ -64,7 +64,7 @@ apart. [`drive/learn/label.py`](../../drive/learn/label.py#L18) · [Ch. 9](09-da
 
 **Plan age** · `now - t_obs`: how old the information behind the action being played
 is. With the policy running back to back it sweeps $[L, 2L)$.
-[`ChunkExecutor.age_s`](../../drive/control/executor.py#L46) · [Ch. 5](05-action-chunking-and-latency.md)
+[`ChunkExecutor.age_s`](../../drive/control/executor.py#L56) · [Ch. 5](05-action-chunking-and-latency.md)
 
 **Platform** · What the control loop needs from a car: a clock, a state, `observe`,
 `range_m` and `apply`. Implemented by the simulator and by the ROS 2 adapter.
