@@ -15,6 +15,7 @@ from .types import STEER, THROTTLE
 
 WIDTH, HEIGHT, PANEL = 960, 440, 480
 WHITE, RED, GREEN, CYAN, DARK = (240, 240, 240), (240, 70, 60), (90, 220, 110), (60, 220, 240), (24, 24, 28)
+GREY, MAGENTA = (150, 150, 150), (240, 80, 210)
 
 
 class Hud:
@@ -26,9 +27,12 @@ class Hud:
     def _px(self, world: World, xy) -> np.ndarray:
         return (world.ground.to_px(np.asarray(xy)) * self.scale).round().astype(np.int32)
 
-    def map_view(self, world: World, colour=WHITE, path=()) -> np.ndarray:
-        """The map from above with the car on it, and `path` (world x, y points) in cyan."""
+    def map_view(self, world: World, colour=WHITE, path=(), trail=()) -> np.ndarray:
+        """The map from above with the car on it, `path` (world x, y points) in cyan and
+        `trail`, where the car has been, in magenta."""
         top = self.map.copy()
+        if len(trail) > 1:
+            cv2.polylines(top, [self._px(world, trail)], False, MAGENTA, 2, cv2.LINE_AA)
         if len(path) > 1:
             cv2.polylines(top, [self._px(world, path)], False, CYAN, 2, cv2.LINE_AA)
         s, v = world.state, world.vehicle
@@ -65,7 +69,7 @@ class Hud:
             text("SAFETY: " + ", ".join(tick.decision.reasons), 10, 390, RED)
         else:
             text("policy in control", 10, 390, GREEN)
-        text("cyan: the plan in the current chunk    q: quit    e: emergency stop", 10, 420, (150, 150, 150))
+        text("cyan: the plan in the current chunk    q: quit    e: emergency stop", 10, 420, GREY)
         return canvas
 
 

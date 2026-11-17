@@ -5,12 +5,16 @@ so its first small error takes it somewhere it has no answer for, and the error 
 The fix used here (as in DART, Laskey et al. 2017): disturb the steering that is
 *applied*, so the car wanders, and record what the teacher *would* do from each of
 those places. The label is always the teacher's clean plan.
+
+`--show` watches it happen, in real time; the recording is the same with or without.
 """
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from ..config import LoopConfig
@@ -18,6 +22,9 @@ from .label import PLAN_DT_S, PLAN_STEPS
 from ..policy.pure_pursuit import PurePursuitPolicy
 from ..recorder import Recorder
 from ..sim import SHAPES, Track, World
+from ..types import ActionChunk
+from ..viewer import CYAN, DARK, GREY, HEIGHT, PANEL, RED, WHITE, WIDTH, Hud, Output
+from .browse import plan_path
 from .project import Project, add_project_argument
 
 
@@ -34,38 +41,139 @@ class Disturbance:
         return self.value
 
 
+class Watch:
+    """The drive being recorded, in a window or a video.
+
+    Left, the camera with the teacher's plan (the label) drawn on the road; right, the
+    map with the plan and, in magenta, where the disturbed car has been; below, how far the
+    disturbance pushes the steering away from what the teacher wants.
+    """
+
+    def __init__(self, show: bool, video: Path | None, dt: float):
+        self.show, self.dt = show, dt
+        self.output = Output(show, video, fps=25)
+        self.deadline = time.perf_counter()
+        self.ticks = 0
+
+    def start(self, world: World, title: str) -> None:
+        self.world, self.title, self.hud = world, title, Hud(world)
+        self.trail: list[tuple[float, float]] = []
+        self.plan = np.empty((0, 2))
+
+    def planned(self, plan: ActionChunk) -> None:
+        """The path the plan takes the car on from here, in world coordinates."""
+        s = self.world.state
+        forward, left = plan_path(plan.actions, plan.dt, s.speed, s.steer, self.world.vehicle).T
+        cos, sin = math.cos(s.yaw), math.sin(s.yaw)
+        self.plan = np.stack([s.x + cos * forward - sin * left, s.y + sin * forward + cos * left], axis=1)
+
+    def tick(self, wanted: float, applied: float, frames: int) -> bool:
+        """After each control tick; False when the viewer asked to stop."""
+        s = self.world.state
+        self.ticks += 1
+        if self.ticks % 5 == 0:
+            self.trail.append((s.x, s.y))
+        key = ""
+        if self.ticks % 2 == 0:                       # 25 frames a second at the 50 Hz tick
+            key = self.output.put(self.frame(wanted, applied, frames))
+        if self.show:                                  # at the car's pace, not the PC's
+            self.deadline = max(self.deadline + self.dt, time.perf_counter())
+            time.sleep(max(self.deadline - time.perf_counter(), 0.0))
+        return key not in ("q", "\x1b")
+
+    def frame(self, wanted: float, applied: float, frames: int) -> np.ndarray:
+        world, s = self.world, self.world.state
+        canvas = np.full((HEIGHT, WIDTH, 3), DARK, np.uint8)
+
+        image = world.image()
+        scale = PANEL / image.shape[1]
+        view = cv2.resize(image, (PANEL, round(image.shape[0] * scale)), interpolation=cv2.INTER_LINEAR)
+        if len(self.plan) > 1:                         # the plan, seen from where the car is now
+            cos, sin = math.cos(s.yaw), math.sin(s.yaw)
+            dx, dy = self.plan[:, 0] - s.x, self.plan[:, 1] - s.y
+            pixels = world.camera.project(cos * dx + sin * dy, -sin * dx + cos * dy) * scale
+            pixels = pixels[np.isfinite(pixels).all(axis=1)].round().astype(np.int32)
+            if len(pixels) > 1:
+                cv2.polylines(view, [pixels], False, CYAN, 2, cv2.LINE_AA)
+        canvas[:view.shape[0], :PANEL] = view
+        top = self.hud.map_view(world, WHITE, self.plan, self.trail + [(s.x, s.y)])
+        canvas[:top.shape[0], PANEL:PANEL + top.shape[1]] = top
+
+        def text(line: str, x: int, y: int, colour=WHITE):
+            cv2.putText(canvas, line, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, colour, 1, cv2.LINE_AA)
+
+        lateral = world.track.project(s.x, s.y)[1]
+        push = applied - wanted
+        text(self.title, PANEL + 10, 322)
+        text(f"t {world.t:4.1f} s   speed {s.speed:4.2f} m/s   off centre {100 * lateral:+4.0f} cm", PANEL + 10, 346)
+        text(f"recorded {frames} frames", PANEL + 10, 370)
+        text(f"steering: teacher wants {wanted:+.2f}   applied {applied:+.2f}   disturbance {push:+.2f}",
+             10, 390, RED if abs(push) > 0.2 else WHITE)
+        text("cyan: the teacher's plan from here, saved as the label   magenta: the car's path   q: stop",
+             10, 420, GREY)
+        return canvas
+
+    def close(self) -> None:
+        self.output.close()
+
+
 def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("peanut",),
-            steer_noise: float = 0.25, name: str = "sim", hz: float = 10.0, seed: int = 0, log=print) -> dict:
-    """Write `episodes` drives to `out/<name>-NNN/`. Returns what the car went through."""
+            steer_noise: float = 0.25, name: str = "sim", hz: float = 10.0, seed: int = 0, log=print,
+            show: bool = False, video: Path | None = None) -> dict:
+    """Write `episodes` drives to `out/<name>-NNN/`. Returns what the car went through.
+
+    `show` opens a window and runs in real time; `video` writes the same view to a file.
+    Neither changes what is recorded. Quitting the window keeps the drives so far.
+    """
     out = Path(out)
     if any(out.glob(f"{name}-*")):
-        raise ValueError(f"{out} already has episodes named {name}-*; choose another --name")
+        raise ValueError(f"{out} already has episodes named {name}-*; choose another --name, "
+                         f"and another --seed unless you want the same drives again")
     config = LoopConfig()
-    worst, frames = 0.0, 0
-    for index in range(episodes):
-        rng = np.random.default_rng([seed, index])
-        # Alternate direction so left and right bends are equally common.
-        track_name, reverse = tracks[index % len(tracks)], bool((index // len(tracks)) % 2)
-        track = Track.named(track_name, reverse)
-        world = World(track, seed=seed + index)
-        world.place(rng.uniform(0, track.length), rng.uniform(-0.15, 0.15), rng.uniform(-0.2, 0.2))
-        speed = rng.uniform(0.9, 1.8)
-        teacher = PurePursuitPolicy(track, world.vehicle, target_speed_mps=speed,
-                                    chunk_size=PLAN_STEPS, chunk_dt_s=PLAN_DT_S)
-        recorder = Recorder(out / f"{name}-{index:03d}", config.task, hz)
-        disturbance, applied = Disturbance(steer_noise, rng), np.zeros(2)
-        while world.t < duration_s - 1e-9:
-            if recorder.due(world.t):
-                obs = world.observe(config.task)
-                recorder.add(world.t, obs.images[0], obs.speed, obs.steer, applied, teacher.infer(obs))
-            steer, throttle = teacher.act(world.state)
-            applied = np.array([min(max(steer + disturbance.step(config.dt), -1.0), 1.0), throttle])
-            world.apply(applied, config.dt)
-            worst = max(worst, abs(track.project(world.state.x, world.state.y)[1]))
-        recorder.save()
-        frames += len(recorder.t)
-        log(f"  episode {index + 1}/{episodes}: {track_name}{' reversed' if reverse else ''}, {speed:.1f} m/s")
-    return {"episodes": episodes, "frames": frames, "max_lateral_m": round(worst, 3)}
+    worst, frames, saved, stopped = 0.0, 0, 0, False
+    watch = Watch(show, video, config.dt) if show or video else None
+    try:
+        for index in range(episodes):
+            rng = np.random.default_rng([seed, index])
+            # Alternate direction so left and right bends are equally common.
+            track_name, reverse = tracks[index % len(tracks)], bool((index // len(tracks)) % 2)
+            track = Track.named(track_name, reverse)
+            world = World(track, seed=seed + index)
+            world.place(rng.uniform(0, track.length), rng.uniform(-0.15, 0.15), rng.uniform(-0.2, 0.2))
+            speed = rng.uniform(0.9, 1.8)
+            teacher = PurePursuitPolicy(track, world.vehicle, target_speed_mps=speed,
+                                        chunk_size=PLAN_STEPS, chunk_dt_s=PLAN_DT_S)
+            recorder = Recorder(out / f"{name}-{index:03d}", config.task, hz)
+            disturbance, applied = Disturbance(steer_noise, rng), np.zeros(2)
+            where = f"{track_name}{' reversed' if reverse else ''}, {speed:.1f} m/s"
+            if watch is not None:
+                watch.start(world, f"{recorder.directory.name} ({index + 1}/{episodes})  {where}")
+            while world.t < duration_s - 1e-9:
+                if recorder.due(world.t):
+                    obs = world.observe(config.task)
+                    plan = teacher.infer(obs)
+                    recorder.add(world.t, obs.images[0], obs.speed, obs.steer, applied, plan)
+                    if watch is not None:
+                        watch.planned(plan)
+                steer, throttle = teacher.act(world.state)
+                applied = np.array([min(max(steer + disturbance.step(config.dt), -1.0), 1.0), throttle])
+                world.apply(applied, config.dt)
+                worst = max(worst, abs(track.project(world.state.x, world.state.y)[1]))
+                if watch is not None and not watch.tick(steer, applied[0], len(recorder.t)):
+                    stopped = True
+                    break
+            if len(recorder.t) >= 2:                   # one frame is not an episode
+                recorder.save()
+                saved += 1
+                frames += len(recorder.t)
+                log(f"  episode {index + 1}/{episodes}: {where}"
+                    + (f", stopped after {recorder.t[-1]:.0f} s" if stopped else ""))
+            if stopped:
+                break
+    finally:
+        if watch is not None:
+            watch.close()
+    return {"episodes": saved, "frames": frames, "max_lateral_m": round(worst, 3), "stopped": stopped}
 
 
 def add_parser(sub):
@@ -78,13 +186,19 @@ def add_parser(sub):
                    help=f"comma-separated, from {', '.join(SHAPES)} (default peanut)")
     p.add_argument("--steer-noise", type=float, default=0.25,
                    help="how hard the applied steering is disturbed; 0 records perfect driving only")
-    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--seed", type=int, default=0,
+                   help="the same seed records the same drives; change it with --name to get new ones")
+    p.add_argument("--show", action="store_true",
+                   help="watch the drives being recorded, in real time (30 s each); q stops and keeps them")
+    p.add_argument("--video", type=Path, help="write the same view to an .mp4")
 
 
 def run(project: Project, args) -> int:
     print(f"recording {args.episodes} drives of {args.duration_s:.0f} s to {project.episodes}")
     done = collect(project.episodes, args.episodes, args.duration_s, tuple(args.tracks), args.steer_noise,
-                   args.name, seed=args.seed)
+                   args.name, seed=args.seed, show=args.show, video=args.video)
     print(f"{done['frames']} frames in {done['episodes']} episodes; the disturbed car strayed up to "
           f"{100 * done['max_lateral_m']:.0f} cm from the centerline")
+    if args.video:
+        print(f"  video: {args.video}")
     return 0
