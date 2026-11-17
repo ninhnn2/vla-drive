@@ -31,13 +31,25 @@ make test
 make help                   # every target
 ```
 
+On a Mac with Apple Silicon there is no NVIDIA GPU for Docker, so the same targets run
+`drive/` natively in a `.venv` and train on the Mac's GPU (MPS). Only ROS 2 uses a
+container, built for arm64 without CUDA, with its windows on XQuartz. Needs
+[uv](https://docs.astral.sh/uv/) (`brew install uv`); for ROS 2 also Docker Desktop and
+XQuartz (`make gui` says what to set).
+
+```bash
+make setup                  # once: Python 3.10, numpy, OpenCV and PyTorch in .venv
+make sim
+make test                   # without the ROS 2 tests; make ros-test runs those in the container
+```
+
 From drives to a network that drives:
 
 ```bash
 make collect                # a teacher drives 40 times in the simulator, with disturbed steering
 make validate               # is the dataset complete, consistent, varied enough?
 make browse                 # every frame, with its label drawn on the road
-make train V=v1             # about 20 s on an RTX 4060
+make train V=v1             # about 20 s on an RTX 4060, 2 min on an M3 Mac
 make evaluate V=v1          # drive it on every track, both ways
 make sim ARGS='--policy cnn --checkpoint v1 --track trefoil'
 ```
@@ -52,7 +64,7 @@ make ros-record             # record the drive as an episode; Ctrl-C saves
 ```
 
 `./drive.sh` also runs outside the container on a PC with numpy and OpenCV; training
-and the learned policy need the container's PyTorch.
+and the learned policy need PyTorch, which the container and `make setup`'s `.venv` have.
 
 ## What it shows
 
@@ -74,7 +86,7 @@ Measured in the simulator; the details and the commands are in
 drive/          the simulator, policies, control loop, safety supervisor
 drive/learn/    the data pipeline: collect, label, validate, browse, train, evaluate, status
 ros/            ROS 2 nodes: the simulated car, the driver, teleop, the recorder
-docker/         the container everything runs in; Makefile has the commands
+docker/         the container everything runs in (compose.mac.yml: on a Mac); Makefile has the commands
 tests/          make test
 runs/           datasets, models and reports (not in git)
 ```

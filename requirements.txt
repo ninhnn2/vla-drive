@@ -1,0 +1,5 @@
+# drive/ outside the container: `make setup` puts these in .venv (how it runs on a Mac).
+# The container has the same: numpy and OpenCV from Ubuntu 22.04, PyTorch 2.5.1.
+numpy>=1.21,<2
+opencv-python>=4.5
+torch==2.5.1
