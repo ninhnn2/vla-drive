@@ -52,7 +52,13 @@ make browse                 # every frame, with its label drawn on the road
 make train V=v1             # about 20 s on an RTX 4060, 2 min on an M3 Mac
 make evaluate V=v1          # drive it on every track, both ways
 make sim ARGS='--policy cnn --checkpoint v1 --track trefoil'
+./drive.sh probe v1 errors  # look inside it: layers, history, errors, activations, saliency, behaviour
 ```
+
+A hands-on course in Vietnamese, from collecting data to judging and debugging the
+network, every command with its real output:
+[docs/thuc-hanh](docs/thuc-hanh/README.md). The theory, in English, is in
+[docs/study](docs/study/README.md).
 
 The same loop over ROS 2 (`make ros-build` once, then one terminal each):
 

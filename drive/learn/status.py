@@ -32,7 +32,7 @@ def summary(project: Project) -> dict:
 
 def next_step(s: dict) -> str:
     if not s["episodes"]:
-        return "record drives: ./drive.sh collect, or over ROS 2 (make ros-drive RECORD=1)"
+        return "record drives: ./drive.sh collect, or over ROS 2 (make ros-record, beside ros-sim and ros-drive)"
     if s["label_sources"].get("unlabelled"):
         return "./drive.sh label"
     if not s["models"]:
