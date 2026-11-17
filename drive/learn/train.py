@@ -13,6 +13,8 @@ import time
 import warnings
 from pathlib import Path
 
+import numpy as np
+
 from . import dataset as datasets
 from .project import Project, add_project_argument
 
@@ -27,6 +29,13 @@ def augment(images, states, plans, generator):
     plans = plans * torch.stack([sign, torch.ones_like(sign)], dim=1)[:, None, :]
     gain = 0.8 + 0.4 * torch.rand(len(images), 1, 1, 1, device=images.device, generator=generator)
     return (images.float() * gain).clamp(0, 255), states, plans
+
+
+def average_plan_loss(train_plans: np.ndarray, val_plans: np.ndarray, beta: float = 0.05) -> float:
+    """The validation loss of a model that learned nothing but the average plan, the same for every
+    frame: the bar a model must clear by far. The loss is train's SmoothL1Loss(beta), in numpy."""
+    error = np.abs(val_plans - train_plans.mean(axis=0, keepdims=True))
+    return float(np.where(error < beta, 0.5 * error ** 2 / beta, error - 0.5 * beta).mean())
 
 
 def pick_device(log=print) -> str:
@@ -46,8 +55,11 @@ def pick_device(log=print) -> str:
 
 
 def train(data: Path, out: Path, epochs: int = 15, batch: int = 128, lr: float = 1e-3,
-          device: str | None = None, seed: int = 0, log=print) -> dict:
-    """Train on the episodes under `data`, save the model to `out`, return the report."""
+          device: str | None = None, seed: int = 0, augmentation: bool = True, log=print) -> dict:
+    """Train on the episodes under `data`, save the model to `out`, return the report.
+
+    `augmentation` False trains on the frames as recorded: no mirroring, no brightness change.
+    """
     import torch
     from .model import ChunkNet, save
 
@@ -56,6 +68,8 @@ def train(data: Path, out: Path, epochs: int = 15, batch: int = 128, lr: float =
     started = time.perf_counter()
     training, validation = datasets.load(data).split()
     log(f"{len(training)} training frames, {len(validation)} validation frames, on {device}")
+    baseline = average_plan_loss(training.plans, validation.plans)
+    log(f"  the average plan, the same for every frame, scores validation {baseline:.5f}: the bar to clear")
 
     def tensors(d):
         return (torch.from_numpy(d.images).to(device), torch.from_numpy(d.states).to(device),
@@ -83,7 +97,10 @@ def train(data: Path, out: Path, epochs: int = 15, batch: int = 128, lr: float =
         total = 0.0
         for i in range(0, len(order), batch):
             pick = order[i:i + batch]
-            x, s, y = augment(images[pick], states[pick], plans[pick], generator)
+            if augmentation:
+                x, s, y = augment(images[pick], states[pick], plans[pick], generator)
+            else:
+                x, s, y = images[pick], states[pick], plans[pick]
             loss = loss_fn(model(x, s), y)
             optimizer.zero_grad()
             loss.backward()
@@ -97,6 +114,8 @@ def train(data: Path, out: Path, epochs: int = 15, batch: int = 128, lr: float =
             f"validation {val_loss:.5f}   steer error {steer_error:.4f}")
 
     report = {"frames": len(training), "validation_frames": len(validation), "epochs": epochs,
+              "batch": batch, "lr": lr, "augmentation": augmentation, "seed": seed,
+              "average_plan_val_loss": round(baseline, 5),
               "parameters": sum(p.numel() for p in model.parameters()), "device": device,
               "seconds": round(time.perf_counter() - started, 1), "history": history}
     out = Path(out)
@@ -111,6 +130,11 @@ def add_parser(sub):
     add_project_argument(p)
     p.add_argument("version", help="a name for the model, e.g. v1; evaluate and sim refer to it by this")
     p.add_argument("--epochs", type=int, default=15)
+    p.add_argument("--batch", type=int, default=128, help="frames per gradient step (default 128)")
+    p.add_argument("--lr", type=float, default=1e-3, help="Adam's learning rate at the start; it decays to 0 "
+                                                          "along a cosine (default 0.001)")
+    p.add_argument("--no-augmentation", dest="augmentation", action="store_false",
+                   help="train on the frames as recorded: no mirroring, no brightness change")
     p.add_argument("--device", help="cuda, mps or cpu (default: cuda when it works, else a Mac's GPU)")
     p.add_argument("--seed", type=int, default=0)
 
@@ -124,7 +148,8 @@ def run(project: Project, args) -> int:
     out = project.model(args.version)
     if out.exists():
         raise ValueError(f"{out} exists; a trained model is not replaced, choose another version")
-    report = train(project.episodes, out, args.epochs, device=args.device, seed=args.seed)
+    report = train(project.episodes, out, args.epochs, args.batch, args.lr, device=args.device, seed=args.seed,
+                   augmentation=args.augmentation)
     print(f"{report['parameters']:,} parameters trained in {report['seconds']} s; "
           f"validation steer error {report['history'][-1]['val_steer_error']}\n  model: {out}")
     return 0

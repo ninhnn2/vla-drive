@@ -119,18 +119,21 @@ class Watch:
 
 def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("peanut",),
             steer_noise: float = 0.25, name: str = "sim", hz: float = 10.0, seed: int = 0, log=print,
-            show: bool = False, video: Path | None = None) -> dict:
+            show: bool = False, video: Path | None = None, speeds: tuple[float, ...] = (0.9, 1.8)) -> dict:
     """Write `episodes` drives to `out/<name>-NNN/`. Returns what the car went through.
 
     `show` opens a window and runs in real time; `video` writes the same view to a file.
     Neither changes what is recorded. Quitting the window keeps the drives so far.
+
+    `speeds` is the range each drive's target speed is drawn from, or one speed for all of
+    them. The network never sees the target, only the speed the car is going at.
     """
     out = Path(out)
     if any(out.glob(f"{name}-*")):
         raise ValueError(f"{out} already has episodes named {name}-*; choose another --name, "
                          f"and another --seed unless you want the same drives again")
     config = LoopConfig()
-    worst, frames, saved, stopped = 0.0, 0, 0, False
+    worst, frames, saved, stopped, off_road = 0.0, 0, 0, False, 0
     watch = Watch(show, video, config.dt) if show or video else None
     try:
         for index in range(episodes):
@@ -140,11 +143,12 @@ def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("pe
             track = Track.named(track_name, reverse)
             world = World(track, seed=seed + index)
             world.place(rng.uniform(0, track.length), rng.uniform(-0.15, 0.15), rng.uniform(-0.2, 0.2))
-            speed = rng.uniform(0.9, 1.8)
+            speed = rng.uniform(speeds[0], speeds[-1])     # one draw either way: the same noise follows
             teacher = PurePursuitPolicy(track, world.vehicle, target_speed_mps=speed,
                                         chunk_size=PLAN_STEPS, chunk_dt_s=PLAN_DT_S)
             recorder = Recorder(out / f"{name}-{index:03d}", config.task, hz)
             disturbance, applied = Disturbance(steer_noise, rng), np.zeros(2)
+            outside = 0                                # frames recorded with the car off the road
             where = f"{track_name}{' reversed' if reverse else ''}, {speed:.1f} m/s"
             if watch is not None:
                 watch.start(world, f"{recorder.directory.name} ({index + 1}/{episodes})  {where}")
@@ -153,6 +157,7 @@ def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("pe
                     obs = world.observe(config.task)
                     plan = teacher.infer(obs)
                     recorder.add(world.t, obs.images[0], obs.speed, obs.steer, applied, plan)
+                    outside += abs(track.project(world.state.x, world.state.y)[1]) > track.width_m / 2
                     if watch is not None:
                         watch.planned(plan)
                 steer, throttle = teacher.act(world.state)
@@ -166,6 +171,7 @@ def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("pe
                 recorder.save()
                 saved += 1
                 frames += len(recorder.t)
+                off_road += outside
                 log(f"  episode {index + 1}/{episodes}: {where}"
                     + (f", stopped after {recorder.t[-1]:.0f} s" if stopped else ""))
             if stopped:
@@ -173,7 +179,8 @@ def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("pe
     finally:
         if watch is not None:
             watch.close()
-    return {"episodes": saved, "frames": frames, "max_lateral_m": round(worst, 3), "stopped": stopped}
+    return {"episodes": saved, "frames": frames, "max_lateral_m": round(worst, 3), "stopped": stopped,
+            "off_road_frames": off_road}
 
 
 def add_parser(sub):
@@ -184,6 +191,9 @@ def add_parser(sub):
     p.add_argument("--duration-s", type=float, default=30.0)
     p.add_argument("--tracks", type=lambda s: s.split(","), default=["peanut"],
                    help=f"comma-separated, from {', '.join(SHAPES)} (default peanut)")
+    p.add_argument("--speeds", type=lambda s: tuple(float(x) for x in s.split(",")), default=(0.9, 1.8),
+                   metavar="LOW,HIGH", help="the range each drive's target speed is drawn from, in m/s, or one "
+                                            "speed for every drive (default 0.9,1.8)")
     p.add_argument("--steer-noise", type=float, default=0.25,
                    help="how hard the applied steering is disturbed; 0 records perfect driving only")
     p.add_argument("--seed", type=int, default=0,
@@ -196,9 +206,16 @@ def add_parser(sub):
 def run(project: Project, args) -> int:
     print(f"recording {args.episodes} drives of {args.duration_s:.0f} s to {project.episodes}")
     done = collect(project.episodes, args.episodes, args.duration_s, tuple(args.tracks), args.steer_noise,
-                   args.name, seed=args.seed, show=args.show, video=args.video)
+                   args.name, seed=args.seed, show=args.show, video=args.video, speeds=args.speeds)
     print(f"{done['frames']} frames in {done['episodes']} episodes; the disturbed car strayed up to "
           f"{100 * done['max_lateral_m']:.0f} cm from the centerline")
+    share = 100 * done["off_road_frames"] / max(done["frames"], 1)
+    print(f"  {done['off_road_frames']} frames ({share:.1f} %) were recorded with the car off the road")
+    if share > 5:
+        # A few frames off the road teach coming back; many teach driving on grass, where the teacher,
+        # who knows the map, still has a plan that the picture cannot explain.
+        print(f"  WARN  that is a lot: the disturbance is stronger than the teacher can correct. "
+              f"Lower --steer-noise (now {args.steer_noise:g})")
     if args.video:
         print(f"  video: {args.video}")
     return 0

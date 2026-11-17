@@ -80,6 +80,7 @@ class CollectTests(unittest.TestCase):
             summary = collect(Path(d) / "data", episodes=2, duration_s=2.0, log=quiet)
             self.assertEqual(summary["frames"], 40)
             self.assertLess(summary["max_lateral_m"], 0.45)
+            self.assertEqual(summary["off_road_frames"], 0)                # 0.45 m is half the road's width
             episode = Path(d) / "data/sim-001"
             data, labels = np.load(episode / "episode.npz"), read_labels(episode)
             self.assertEqual(sorted(data), ["actions", "images", "states", "t"])
@@ -103,6 +104,12 @@ class CollectTests(unittest.TestCase):
                 collect(Path(d) / "a", episodes=1, duration_s=1.0, log=quiet)
             collect(Path(d) / "a", episodes=1, duration_s=1.0, name="more", log=quiet)
             self.assertEqual(sorted(p.name for p in (Path(d) / "a").iterdir()), ["more-000", "sim-000"])
+
+    def test_one_target_speed_for_every_drive(self):
+        with tempfile.TemporaryDirectory() as d:
+            collect(Path(d) / "fixed", episodes=2, duration_s=4.0, speeds=(1.2,), log=quiet)
+            top = [np.load(e / "episode.npz")["states"][:, 0].max() for e in sorted((Path(d) / "fixed").iterdir())]
+            np.testing.assert_allclose(top, [1.2, 1.2], atol=0.05)                 # both cruise at 1.2 m/s
 
     def test_watching_does_not_change_the_recording(self):
         with tempfile.TemporaryDirectory() as d:
@@ -317,6 +324,17 @@ class EvaluateTests(unittest.TestCase):
             self.assertTrue((Path(d) / "reports/pure-pursuit.json").is_file())
         self.assertRegex(out.getvalue(), r"pure-pursuit\s+2/2")
 
+    def test_a_report_is_named_after_the_whole_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            project = Project(Path(d))
+            for version in ("v1", "v1.2"):
+                project.model(version).parent.mkdir(parents=True, exist_ok=True)
+                project.model(version).write_bytes(b"")
+            # v1.2 must not overwrite v1's report: status looks it up as reports/v1.2.json
+            self.assertEqual(report_name("v1.2", project.checkpoint("v1.2")), "v1.2")
+            self.assertEqual(report_name("v1", project.checkpoint("v1")), "v1")
+            self.assertEqual(report_name(str(project.model("v1.2")), project.model("v1.2")), "v1.2")
+
 
 class ExportTests(unittest.TestCase):
     """Episodes as a LeRobotDataset. The per-frame mapping needs only numpy; writing needs lerobot."""
@@ -385,6 +403,51 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(report_name(str(checkpoint), checkpoint), "smolvla-v1")
             with self.assertRaisesRegex(ValueError, "needs a checkpoint"):
                 run(EpisodeConfig(policy="vla", duration_s=0.1))
+
+
+@needs_torch
+class ProbeTests(unittest.TestCase):
+    def test_every_probe_runs_and_draws(self):
+        from drive.learn.probe import WHAT
+        from drive.learn.train import train
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(io.StringIO()) as out:
+            project = Project(Path(d))
+            small_dataset(project.episodes)
+            train(project.episodes, project.model("v1.0"), epochs=1, device="cpu", log=quiet)
+            for what in WHAT:
+                self.assertEqual(cli.main(["probe", "v1.0", what, "--project", d, "--worst", "2"]), 0, what)
+            pictures = sorted(p.name.split("-")[0] for p in (project.home / "probe/v1.0").glob("*.png"))
+            self.assertEqual(pictures, ["activations", "saliency", "worst", "worst"])
+            with self.assertRaises(SystemExit):
+                cli.main(["probe", "v1.0", "saliency", "--project", d, "--frame", "sim-000"])
+        text = out.getvalue()
+        for expected in ("323,124 parameters", "63x63 px of the 96x128 input", "held out: 1 episodes (sim-002)",
+                         "never active on 20 frames", "mirror:", "+0.12 throttle per m/s"):
+            self.assertIn(expected, text)
+
+    def test_history_names_what_the_curves_show(self):
+        from drive.learn.probe import history
+
+        def report(train_losses, val_losses):
+            return {"frames": 100, "validation_frames": 10, "epochs": len(train_losses), "seconds": 1.0,
+                    "device": "cpu", "history": [{"epoch": i + 1, "train_loss": t, "val_loss": v, "val_steer_error": v}
+                                                 for i, (t, v) in enumerate(zip(train_losses, val_losses))]}
+        lines = []
+        overfit = history(report([0.1, 0.05, 0.03, 0.02, 0.01, 0.005], [0.1, 0.06, 0.05, 0.06, 0.07, 0.08]), lines.append)
+        self.assertTrue(overfit["verdicts"][0].startswith("OVERFITTING"))
+        self.assertEqual(overfit["best_epoch"], 3)
+        healthy = history(report([0.1, 0.05, 0.03, 0.02, 0.019, 0.018], [0.09, 0.05, 0.035, 0.03, 0.029, 0.029]),
+                          lines.append)
+        self.assertTrue(healthy["verdicts"][0].startswith("HEALTHY"))
+        stuck = history(report([0.1, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.1]), lines.append)
+        self.assertTrue(any(v.startswith("NOT LEARNING") for v in stuck["verdicts"]))
+        # Against the average plan's loss: falling curves can still mean it learned nothing.
+        falling = report([0.1, 0.08, 0.077, 0.076], [0.095, 0.088, 0.086, 0.085])
+        self.assertTrue(history(falling, lines.append, baseline=0.12)["verdicts"][0].startswith("NOT LEARNING"))
+        self.assertTrue(history(falling, lines.append, baseline=0.25)["verdicts"][0].startswith("UNDERFITTING"))
+        own = history({**falling, "average_plan_val_loss": 1.0}, lines.append, baseline=0.12)
+        self.assertEqual(own["average_plan_val_loss"], 1.0)                    # the report's own figure wins
+        self.assertFalse(any(v.startswith(("NOT LEARNING", "UNDERFITTING")) for v in own["verdicts"]))
 
 
 class StatusTests(unittest.TestCase):
@@ -467,6 +530,12 @@ class LearnTests(unittest.TestCase):
             self.assertEqual(json.loads((d / "cnn.json").read_text()), report)
             again = train(d / "data", d / "again.pt", epochs=2, device="cpu", log=quiet)
             self.assertEqual(report["history"], again["history"])
+            self.assertEqual((report["lr"], report["batch"], report["augmentation"], report["seed"]),
+                             (1e-3, 128, True, 0))
+            self.assertGreater(report["average_plan_val_loss"], report["history"][-1]["val_loss"])
+            plain = train(d / "data", d / "plain.pt", epochs=2, device="cpu", augmentation=False, log=quiet)
+            self.assertFalse(plain["augmentation"])
+            self.assertNotEqual(plain["history"], report["history"])
 
             policy = CnnPolicy(d / "cnn.pt")
             world = World()
