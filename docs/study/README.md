@@ -30,6 +30,7 @@ this says why it is built the way it is.
 | 15 | [Hands-on labs](15-hands-on-labs.md) | run 14 practical exercises |
 | 16 | [Experiments and engineering analysis](16-experiments.md) | design and interpret your own experiments |
 | | [Glossary](GLOSSARY.md) · [References](REFERENCES.md) · [Study tracker](STUDY-TRACKER.md) | |
+| | [Architecture diagrams](diagrams/vla-drive-architecture.drawio) (draw.io, 5 pages) | see the pipeline, the runtime loop and the SmolVLA model at a glance; find your way in the source; plan how to improve the model |
 
 ## How every statement is labelled
 
