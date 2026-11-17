@@ -68,7 +68,7 @@ it has not reached. So that the two are never confused, claims carry one of thes
 
 ## State of the working tree this guide describes
 
-Branch `smolvla-sim`: the initial commit (`6e1b971`) plus `collect --show/--video`,
+Branch `smolvla-sim`: the initial commit (`34e83ed`) plus `collect --show/--video`,
 `browse --match`, the `export` stage, the `vla` policy (`LeRobotBackend`), the
 `vla/<version>` checkpoints of `Project`, the HUD's debug panel and `sim --log`.
 82 tests pass in the container (`make test`); on the host Python, 5 of them are
