@@ -38,7 +38,7 @@ def run(project, args) -> int: ...     # do it; the return value is the exit cod
 ```
 
 and an entry in [`STAGES`](../../drive/learn/__init__.py#L17). The CLI
-([`cli.main`](../../drive/cli.py#L143)) registers every stage's parser and dispatches
+([`cli.main`](../../drive/cli.py#L148)) registers every stage's parser and dispatches
 by name. Adding a stage is writing that module and listing it.
 
 ## The project directory
@@ -64,7 +64,7 @@ runs/drive/
 
 ## The episode format
 
-Written by [`Recorder.save`](../../drive/recorder.py#L45).
+Written by [`Recorder.save`](../../drive/recorder.py#L46).
 
 ### `episode.npz`
 
@@ -150,7 +150,7 @@ An episode of 300 frames is about 3.4 MB compressed (69 MB raw: the images domin
 | **Purpose** | Record the pure-pursuit teacher driving with disturbed steering |
 | **Input** | none (the simulator) |
 | **Output** | `episodes/<name>-NNN/` with `episode.npz`, `meta.json` **and** `labels.npz` (source `teacher`) |
-| **Source** | [`collect`](../../drive/learn/collect.py#L120), [`Disturbance`](../../drive/learn/collect.py#L31), [`Recorder`](../../drive/recorder.py#L12) |
+| **Source** | [`collect`](../../drive/learn/collect.py#L120), [`Disturbance`](../../drive/learn/collect.py#L31), [`Recorder`](../../drive/recorder.py#L13) |
 | **CLI** | `./drive.sh collect [--project DIR] [--name sim] [--episodes 40] [--duration-s 30] [--tracks peanut] [--steer-noise 0.25] [--seed 0] [--show] [--video FILE]` |
 
 Per episode: choose track and direction; place the car at a random point, off-centre

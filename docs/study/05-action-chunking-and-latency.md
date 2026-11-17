@@ -126,7 +126,7 @@ the new one is used alone (`test_fade_survives_an_exhausted_previous_chunk`).
 
 $$\text{age}(t) = t - t_{\text{obs}}$$
 
-([`ChunkExecutor.age_s`](../../drive/control/executor.py#L46); infinite when there is
+([`ChunkExecutor.age_s`](../../drive/control/executor.py#L56); infinite when there is
 no chunk.) With the policy running back to back, a chunk arrives $L$ after its
 observation and is replaced $L$ later:
 
@@ -310,7 +310,10 @@ teacher on one track, to be tested ([experiment E2](16-experiments.md)), not a l
 
 1. Reproduce the table: `./drive.sh sweep --max-plan-age-ms 1500 --latencies 0,100,200,250,300,400`.
 2. Watch it fail: `make sim ARGS='--latency-ms 300 --max-plan-age-ms 1500'`, then 400.
-   In the HUD, the cyan line is the plan; watch it swing from side to side.
+   In the HUD, the cyan line is the plan; watch it swing from side to side. In the
+   debug panel under it, the grey band is the part of each chunk skipped by latency
+   compensation: it widens with the latency, and the white "now" line sweeps from its
+   edge to twice its width before the next chunk replaces it.
 3. Predict, then test: at 1.0 m/s, is 300 ms stable?
    `./drive.sh sweep --speed 1.0 --max-plan-age-ms 1500 --latencies 300`
 

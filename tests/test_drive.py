@@ -1,4 +1,5 @@
 """drive/: the simulator, chunk execution, the safety supervisor and whole drives."""
+import csv
 import io
 import json
 import math
@@ -14,7 +15,7 @@ import numpy as np
 from drive import cli
 from drive.config import SafetyLimits, VehicleParams
 from drive.control import ChunkExecutor, SimulatedWorker, ThreadedWorker
-from drive.episode import EpisodeConfig, run
+from drive.episode import EpisodeConfig, build, run
 from drive.policy.base import Policy
 from drive.policy.lane_camera import road_mask, runs
 from drive.policy.pure_pursuit import pursuit_steer
@@ -24,6 +25,7 @@ from drive.safety import SafetySupervisor
 from drive.sim import Obstacle, Track, World, step_vehicle
 from drive.sim.render import ASPHALT
 from drive.types import ActionChunk, Observation, VehicleState
+from drive.viewer import HEIGHT, HUD_HEIGHT, WIDTH, Hud
 
 
 def ramp(n=5, dt=0.1, t_obs=0.0) -> ActionChunk:
@@ -411,6 +413,27 @@ class OutputTests(unittest.TestCase):
             self.assertGreater((d / "v.mp4").stat().st_size, 10_000)
             self.assertEqual(len(np.load(d / "rec/episode.npz")["t"]), 20)
             self.assertIn("obstacles: not hit", out.getvalue())
+
+    def test_action_log_and_debug_panel(self):
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(io.StringIO()) as out:
+            log = Path(d) / "actions.csv"
+            self.assertEqual(cli.main(["sim", "--duration-s", "1", "--log", str(log)]), 0)
+            self.assertIn("action log", out.getvalue())
+            rows = list(csv.DictReader(log.open()))
+        self.assertEqual(len(rows), 50)                                    # every tick at 50 Hz
+        self.assertEqual((rows[0]["overrides"], rows[0]["cmd_steer"], rows[0]["throttle"]), ("stale", "", "-1.0"))
+        arrivals = [r for r in rows if r["new_chunk"] == "1"]
+        self.assertEqual(len(arrivals), 9)                                 # one every 100 ms after the first
+        self.assertEqual((arrivals[0]["t"], arrivals[0]["chunk_t_obs"], arrivals[0]["plan_age_ms"]), ("0.1", "0.0", "100.0"))
+        self.assertNotEqual(arrivals[0]["cmd_steer"], "")
+        # The HUD grows a debug panel underneath, for every policy.
+        world, loop = build(EpisodeConfig())
+        for _ in range(8):
+            tick = loop.step()
+        frame = Hud(world).frame(world, loop, tick)
+        self.assertEqual(frame.shape, (HUD_HEIGHT, WIDTH, 3))
+        self.assertGreater(frame[HEIGHT:].std(), 10)                       # something is drawn there
+        loop.worker.close()
 
     def test_cli_sweep(self):
         with redirect_stdout(io.StringIO()) as out:

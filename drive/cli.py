@@ -3,6 +3,7 @@
     ./drive.sh sim --show                          watch the default drive
     ./drive.sh sim --latency-ms 400 --video out.mp4
     ./drive.sh sim --obstacle 8 --show             a cone on the track: safety stops the car
+    ./drive.sh sim --log runs/actions.csv          every tick's action, as the policy asked and as applied
     ./drive.sh sweep                               tracking error against inference latency
 
 From drives to a network that drives (a project lives in runs/drive):
@@ -71,17 +72,21 @@ def cmd_sim(args) -> int:
                          latency_compensation=not args.no_latency_compensation,
                          realtime=args.realtime or args.show)
     on_tick, closers = None, []
-    if args.show or args.video or args.record:
-        from .recorder import Recorder
-        from .viewer import Hud, Output
-        output = Output(args.show, args.video, fps=25) if args.show or args.video else None
+    if args.show or args.video or args.record or args.log:
+        from .recorder import ActionLog, Recorder
+        from .viewer import HUD_HEIGHT, WIDTH, Hud, Output
+        output = Output(args.show, args.video, fps=25, size=(WIDTH, HUD_HEIGHT)) if args.show or args.video else None
         recorder = Recorder(args.record, task="drive along the track") if args.record else None
+        log = ActionLog(args.log) if args.log else None
         hud, count = None, 0
 
         def on_tick(world, loop, tick):
             nonlocal hud, count
             if recorder is not None and recorder.due(tick.t):
                 recorder.add(tick.t, world.image(), world.state.speed, world.state.steer, tick.decision.action)
+            if log is not None:
+                state = world.state
+                log.add(tick, loop.executor.chunk, state.speed, state.steer, world.track.project(state.x, state.y)[1])
             count += 1
             if output is None or count % 2:
                 return True
@@ -91,14 +96,14 @@ def cmd_sim(args) -> int:
                 loop.safety.estop(not loop.safety.estopped)
             return key not in ("q", "\x1b")
 
-        closers = [c for c in (output and output.close, recorder and recorder.save) if c]
+        closers = [c for c in (output and output.close, recorder and recorder.save, log and log.close) if c]
     try:
         result = run(config, on_tick)
     finally:
         for close in closers:
             close()
     print(report(result))
-    for label, path in (("video", args.video), ("recording", args.record)):
+    for label, path in (("video", args.video), ("recording", args.record), ("action log", args.log)):
         if path:
             print(f"  {label}: {path}")
     if args.out:
@@ -155,6 +160,8 @@ def main(argv=None) -> int:
     sim.add_argument("--realtime", action="store_true", help="real clock and inference thread, without a window")
     sim.add_argument("--video", type=Path, help="write the HUD to an .mp4")
     sim.add_argument("--record", type=Path, help="save frames, states and actions to this directory")
+    sim.add_argument("--log", type=Path, metavar="CSV",
+                     help="write every control tick: the policy's action, what went to the motors, and why")
     sim.add_argument("--out", type=Path, help="write the result as JSON")
     sim.set_defaults(run=cmd_sim)
 
