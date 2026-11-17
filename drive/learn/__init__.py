@@ -7,10 +7,11 @@
     train      fit the network -> models/<version>.pt
     evaluate   drive the models on every track -> reports/
     status     what the project holds, and the next step
+    export     the episodes as a LeRobotDataset, to fine-tune a VLA (needs lerobot)
 
 A stage is a module with `add_parser(subparsers)` and `run(project, args)`; adding one
 is writing that module and listing it here. Files are laid out by `project.py`.
 """
-from . import browse, collect, evaluate, label, status, train, validate
+from . import browse, collect, evaluate, export, label, status, train, validate
 
-STAGES = [collect, label, validate, browse, train, evaluate, status]
+STAGES = [collect, label, validate, browse, train, evaluate, status, export]

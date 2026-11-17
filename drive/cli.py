@@ -15,6 +15,13 @@ From drives to a network that drives (a project lives in runs/drive):
     ./drive.sh evaluate v1             drive it on every track
     ./drive.sh sim --policy cnn --checkpoint v1 --show
     ./drive.sh status                  what there is, and the next step
+
+Towards a VLA (needs an environment with lerobot; see docs/study/13-vla-and-smolvla.md):
+
+    python -m drive export             the episodes as a LeRobotDataset (runs/drive/lerobot)
+    lerobot-train ...                  fine-tune SmolVLA into runs/drive/vla/<version>
+    python -m drive sim --policy vla --checkpoint smolvla-v1
+    python -m drive evaluate smolvla-v1
 """
 from __future__ import annotations
 
@@ -34,7 +41,9 @@ def episode_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--policy", choices=POLICIES, default="pure-pursuit",
                    help="pure-pursuit: a teacher that knows the map; lane-camera: follows the road it sees; "
                         "cnn: a network trained with ./drive.sh train")
-    p.add_argument("--checkpoint", help="for --policy cnn: a trained version (v1) or a checkpoint file")
+    p.add_argument("--checkpoint", help="for --policy cnn: a trained version (v1) or a checkpoint file; "
+                                        "for --policy vla: a version in <project>/vla (smolvla-v1) or a "
+                                        "LeRobot checkpoint directory")
     add_project_argument(p)
     p.add_argument("--track", choices=list(SHAPES), default="peanut")
     p.add_argument("--reverse", action="store_true", help="drive the track clockwise")

@@ -11,8 +11,10 @@ import numpy as np
 from drive import cli
 from drive.episode import EpisodeConfig, run
 from drive.learn import dataset as datasets
+from drive.learn import export
 from drive.learn.browse import browse, plan_path
 from drive.learn.collect import collect
+from drive.learn.evaluate import report_name
 from drive.learn.label import PLAN_DT_S, PLAN_STEPS, label, plans_from_actions, read_labels
 from drive.learn.project import Project
 from drive.learn.status import next_step, summary
@@ -27,6 +29,11 @@ except ImportError:                      # the simulator runs without PyTorch; t
     torch = None
 if torch is not None and not hasattr(torch, "nn"):
     torch = None                         # an empty leftover directory named torch
+
+try:
+    import lerobot
+except ImportError:                      # only an environment set up for VLA fine-tuning has it
+    lerobot = None
 
 needs_torch = unittest.skipIf(torch is None, "PyTorch is not installed (use the container: make test)")
 
@@ -309,6 +316,75 @@ class EvaluateTests(unittest.TestCase):
             self.assertEqual((report["policy"], report["summary"]["drives_passed"]), ("lane-camera", 2))
             self.assertTrue((Path(d) / "reports/pure-pursuit.json").is_file())
         self.assertRegex(out.getvalue(), r"pure-pursuit\s+2/2")
+
+
+class ExportTests(unittest.TestCase):
+    """Episodes as a LeRobotDataset. The per-frame mapping needs only numpy; writing needs lerobot."""
+
+    def test_frames_carry_the_teachers_intended_action_not_the_disturbed_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            episode = small_dataset(Path(d), episodes=1, duration_s=2.0) / "sim-000"
+            data, labels = np.load(episode / "episode.npz"), read_labels(episode)
+            meta, rows = export.frames(episode)
+            self.assertEqual((meta["fps"], len(rows)), (10.0, 20))
+            self.assertEqual(sorted(rows[0]), sorted([export.CAMERA, "observation.state", "action", "task"]))
+            np.testing.assert_array_equal(rows[5][export.CAMERA], data["images"][5])
+            np.testing.assert_allclose(rows[5]["observation.state"], data["states"][5])
+            np.testing.assert_allclose([r["action"] for r in rows], labels["plans"][:, 0], atol=1e-6)
+            _, applied = export.frames(episode, "applied")
+            np.testing.assert_allclose([r["action"] for r in applied], data["actions"], atol=1e-6)
+            self.assertGreater(np.abs(labels["plans"][1:, 0, 0] - data["actions"][1:, 0]).mean(), 0.02)
+            self.assertEqual(export.features((240, 320, 3))[export.CAMERA]["shape"], (240, 320, 3))
+
+    def test_frames_refuse_unlabelled_and_unsteady_episodes(self):
+        with tempfile.TemporaryDirectory() as d:
+            episode = manual_drive(Path(d) / "manual")
+            with self.assertRaisesRegex(ValueError, "not labelled"):
+                export.frames(episode)
+            label(Path(d))
+            _, rows = export.frames(episode)                          # labelled from its actions
+            np.testing.assert_allclose([r["action"] for r in rows], np.load(episode / "episode.npz")["actions"],
+                                       atol=1e-6)
+            recorder = Recorder(Path(d) / "jittery", "drive", 10.0)
+            for i in range(20):                                       # every other frame 60 ms late
+                recorder.add(i / 10 + 0.06 * (i % 2), np.zeros((240, 320, 3), np.uint8), 1.0, 0.0, [0.0, 0.2])
+            jittery = recorder.save()
+            label(Path(d))
+            with self.assertRaisesRegex(ValueError, "stray 60 ms"):
+                export.frames(jittery)
+            with self.assertRaisesRegex(ValueError, "--action"):
+                export.frames(episode, "wanted")
+
+    def test_export_writes_a_dataset_lerobot_can_read(self):
+        with tempfile.TemporaryDirectory() as d:
+            data = small_dataset(Path(d) / "episodes", episodes=2, duration_s=1.0)
+            if lerobot is None:
+                with self.assertRaisesRegex(ValueError, "needs LeRobot"):
+                    export.export(data, Path(d) / "lerobot", log=quiet)
+                return
+            done = export.export(data, Path(d) / "lerobot", match="sim-*", log=quiet)
+            self.assertEqual((done["episodes"], done["frames"], done["fps"]), (2, 20, 10))
+            from lerobot.datasets.lerobot_dataset import LeRobotDataset
+            dataset = LeRobotDataset("local/test", root=Path(d) / "lerobot")
+            self.assertEqual((len(dataset), dataset.meta.total_episodes), (20, 2))
+            plans = read_labels(data / "sim-001")["plans"]
+            np.testing.assert_allclose(dataset[13]["action"].numpy(), plans[3, 0], atol=1e-6)
+            with self.assertRaisesRegex(ValueError, "exists"):
+                export.export(data, Path(d) / "lerobot", log=quiet)
+
+    def test_a_vla_version_is_found_and_driven_by_the_vla_policy(self):
+        with tempfile.TemporaryDirectory() as d:
+            project = Project(Path(d))
+            checkpoint = project.vla("smolvla-v1")
+            checkpoint.mkdir(parents=True)
+            (checkpoint / "config.json").write_text("{}")
+            self.assertEqual(project.checkpoint("smolvla-v1"), checkpoint)
+            self.assertEqual(project.checkpoint(str(checkpoint)), checkpoint)
+            self.assertEqual(project.policy_for(checkpoint), "vla")
+            self.assertEqual(report_name("smolvla-v1", checkpoint), "smolvla-v1")
+            self.assertEqual(report_name(str(checkpoint), checkpoint), "smolvla-v1")
+            with self.assertRaisesRegex(ValueError, "needs a checkpoint"):
+                run(EpisodeConfig(policy="vla", duration_s=0.1))
 
 
 class StatusTests(unittest.TestCase):
