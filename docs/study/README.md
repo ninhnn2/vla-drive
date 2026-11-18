@@ -31,7 +31,7 @@ this says why it is built the way it is.
 | 16 | [Experiments and engineering analysis](16-experiments.md) | design and interpret your own experiments |
 | 17 | [Debugging the model and the algorithm](17-debugging-the-model.md) | localise a fault: data, training, the model offline, or the loop |
 | | [Glossary](GLOSSARY.md) · [References](REFERENCES.md) · [Study tracker](STUDY-TRACKER.md) | |
-| | [Thực hành (tiếng Việt)](../thuc-hanh/README.md): 6 bài | collect, read and judge data; name every layer; train and read the curves; analyse the model's output offline and in closed loop with `./drive.sh probe`; run 12 optimisation experiments; debug |
+| | [Thực hành (tiếng Việt)](../thuc-hanh/README.md): 7 bài | collect, read and judge data; name every layer; train and read the curves; analyse the model's output offline and in closed loop with `./drive.sh probe`; run 12 optimisation experiments; debug; the learning-rate range test, gradients and update ratios, input ablation, on-policy error and DAgger |
 | | [Architecture diagrams](diagrams/vla-drive-architecture.drawio) (draw.io, 5 pages) | see the pipeline, the runtime loop and the SmolVLA model at a glance; find your way in the source; plan how to improve the model |
 
 ## How every statement is labelled

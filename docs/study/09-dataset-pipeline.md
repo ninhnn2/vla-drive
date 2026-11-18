@@ -151,13 +151,16 @@ An episode of 300 frames is about 3.4 MB compressed (69 MB raw: the images domin
 | **Input** | none (the simulator) |
 | **Output** | `episodes/<name>-NNN/` with `episode.npz`, `meta.json` **and** `labels.npz` (source `teacher`) |
 | **Source** | [`collect`](../../drive/learn/collect.py#L120), [`Disturbance`](../../drive/learn/collect.py#L31), [`Recorder`](../../drive/recorder.py#L13) |
-| **CLI** | `./drive.sh collect [--project DIR] [--name sim] [--episodes 40] [--duration-s 30] [--tracks peanut] [--speeds 0.9,1.8] [--steer-noise 0.25] [--seed 0] [--show] [--video FILE]` |
+| **CLI** | `./drive.sh collect [--project DIR] [--name sim] [--episodes 40] [--duration-s 30] [--tracks peanut] [--speeds 0.9,1.8] [--steer-noise 0.25] [--seed 0] [--show] [--video FILE] [--driver teacher\|cnn --checkpoint V [--beta 0]]` |
 
 Per episode: choose track and direction; place the car at a random point, off-centre
 and askew; draw a target speed in 0.9–1.8 m/s (`--speeds`; one value fixes it); run at
 50 Hz, sampling at 10 Hz. The defaults give 40 × 300 = 12 000 frames in about 35 s. The
 last line of the output counts the frames recorded with the car off the road; above 5 %
-it warns that the disturbance is stronger than the teacher can correct.
+it warns that the disturbance is stronger than the teacher can correct. With `--driver cnn
+--checkpoint v1` a trained network drives through the control loop and supervisor while the
+teacher labels every frame: DAgger (Ross et al. 2011), worked through in
+[docs/thuc-hanh, lesson 7](../thuc-hanh/07-debug-chuyen-nghiep.md).
 
 **What is recorded at each sample** (`recorder.add`): the time, the camera image, the
 state, the action applied on the *previous* tick, and the teacher's fresh plan

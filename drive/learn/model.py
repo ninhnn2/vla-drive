@@ -36,6 +36,11 @@ class ChunkNet(nn.Module):
         return self.head(torch.cat([self.vision(x), states], dim=1)).view(-1, self.steps, 2)
 
 
+def named_layers(model: ChunkNet) -> list[tuple[str, nn.Module]]:
+    """Every layer by the name probe and the training report use: vision.0 ... head.5."""
+    return [(f"vision.{i}", m) for i, m in enumerate(model.vision)] + [(f"head.{i}", m) for i, m in enumerate(model.head)]
+
+
 def save(path, model: ChunkNet, plan_dt: float, report: dict) -> None:
     torch.save({"weights": model.state_dict(), "steps": model.steps, "image_hw": list(model.image_hw),
                 "plan_dt": plan_dt, "report": report}, path)

@@ -287,4 +287,4 @@ hai dòng `breakpoint()` sau khi debug xong** (`git diff` sẽ nhắc bạn), v�
    rồi model lại đổi lái ngược lại.
 </details>
 
-**Hết.** Quay lại [mục lục](README.md).
+**Tiếp theo:** [Bài 7 · Debug và tối ưu như dân chuyên nghiệp](07-debug-chuyen-nghiep.md)

@@ -7,6 +7,12 @@ The fix used here (as in DART, Laskey et al. 2017): disturb the steering that is
 those places. The label is always the teacher's clean plan.
 
 `--show` watches it happen, in real time; the recording is the same with or without.
+
+DAgger (Ross et al. 2011) goes one step further: `--driver cnn --checkpoint v1` lets a
+trained network drive, through the same control loop and supervisor as `sim`, and the
+teacher labels every frame of *its* drive. The data then covers the places the learner's
+own mistakes take it, which no demonstration does. `--beta` hands the wheel to the teacher
+on that share of the ticks, to keep a weak learner near the road.
 """
 from __future__ import annotations
 
@@ -17,7 +23,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from ..config import LoopConfig
+from ..config import LoopConfig, SafetyLimits
 from .label import PLAN_DT_S, PLAN_STEPS
 from ..policy.pure_pursuit import PurePursuitPolicy
 from ..recorder import Recorder
@@ -117,9 +123,40 @@ class Watch:
         self.output.close()
 
 
+class Mixer:
+    """The world as the learner's control loop sees it, except at the wheels: on a `beta` share
+    of the ticks the teacher's action goes there instead, and the disturbance is added on top."""
+
+    def __init__(self, world: World, teacher: PurePursuitPolicy, beta: float, disturbance, rng):
+        self.world, self.teacher, self.beta, self.disturbance, self.rng = world, teacher, beta, disturbance, rng
+        self.applied = np.zeros(2)
+
+    @property
+    def t(self) -> float:
+        return self.world.t
+
+    @property
+    def state(self):
+        return self.world.state
+
+    def observe(self, task: str):
+        return self.world.observe(task)
+
+    def range_m(self) -> float:
+        return self.world.range_m()
+
+    def apply(self, action, dt: float) -> None:
+        action = np.asarray(action, float)
+        if self.beta and self.rng.random() < self.beta:
+            action = np.array(self.teacher.act(self.world.state))
+        self.applied = np.array([min(max(action[0] + self.disturbance.step(dt), -1.0), 1.0), action[1]])
+        self.world.apply(self.applied, dt)
+
+
 def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("peanut",),
             steer_noise: float = 0.25, name: str = "sim", hz: float = 10.0, seed: int = 0, log=print,
-            show: bool = False, video: Path | None = None, speeds: tuple[float, ...] = (0.9, 1.8)) -> dict:
+            show: bool = False, video: Path | None = None, speeds: tuple[float, ...] = (0.9, 1.8),
+            driver: Path | None = None, beta: float = 0.0, latency_ms: float = 100.0) -> dict:
     """Write `episodes` drives to `out/<name>-NNN/`. Returns what the car went through.
 
     `show` opens a window and runs in real time; `video` writes the same view to a file.
@@ -127,7 +164,17 @@ def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("pe
 
     `speeds` is the range each drive's target speed is drawn from, or one speed for all of
     them. The network never sees the target, only the speed the car is going at.
+
+    `driver`, a CNN checkpoint, drives instead of the teacher (DAgger); the teacher still
+    labels every frame. `beta` is the share of ticks the teacher drives instead.
     """
+    learner = None
+    if driver is not None:
+        from ..control.inference import SimulatedWorker
+        from ..loop import DriveLoop
+        from ..policy.cnn import CnnPolicy
+        from ..safety import SafetySupervisor
+        learner = CnnPolicy(Path(driver))
     out = Path(out)
     if any(out.glob(f"{name}-*")):
         raise ValueError(f"{out} already has episodes named {name}-*; choose another --name, "
@@ -149,6 +196,11 @@ def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("pe
             recorder = Recorder(out / f"{name}-{index:03d}", config.task, hz)
             disturbance, applied = Disturbance(steer_noise, rng), np.zeros(2)
             outside = 0                                # frames recorded with the car off the road
+            loop = None
+            if learner is not None:
+                wheel = Mixer(world, teacher, beta, disturbance, np.random.default_rng([seed, index, 1]))
+                loop = DriveLoop(wheel, SimulatedWorker(learner, latency_ms / 1000, 0.0, seed + index),
+                                 SafetySupervisor(SafetyLimits()), config)
             where = f"{track_name}{' reversed' if reverse else ''}, {speed:.1f} m/s"
             if watch is not None:
                 watch.start(world, f"{recorder.directory.name} ({index + 1}/{episodes})  {where}")
@@ -160,13 +212,20 @@ def collect(out: Path, episodes: int = 40, duration_s: float = 30.0, tracks=("pe
                     outside += abs(track.project(world.state.x, world.state.y)[1]) > track.width_m / 2
                     if watch is not None:
                         watch.planned(plan)
-                steer, throttle = teacher.act(world.state)
-                applied = np.array([min(max(steer + disturbance.step(config.dt), -1.0), 1.0), throttle])
-                world.apply(applied, config.dt)
+                if loop is None:                           # the teacher drives, disturbed
+                    steer, throttle = teacher.act(world.state)
+                    applied = np.array([min(max(steer + disturbance.step(config.dt), -1.0), 1.0), throttle])
+                    world.apply(applied, config.dt)
+                else:                                      # the learner drives; the teacher only labels
+                    steer = teacher.act(world.state)[0]
+                    loop.step()
+                    applied = wheel.applied
                 worst = max(worst, abs(track.project(world.state.x, world.state.y)[1]))
                 if watch is not None and not watch.tick(steer, applied[0], len(recorder.t)):
                     stopped = True
                     break
+            if loop is not None:
+                loop.worker.close()
             if len(recorder.t) >= 2:                   # one frame is not an episode
                 recorder.save()
                 saved += 1
@@ -194,8 +253,14 @@ def add_parser(sub):
     p.add_argument("--speeds", type=lambda s: tuple(float(x) for x in s.split(",")), default=(0.9, 1.8),
                    metavar="LOW,HIGH", help="the range each drive's target speed is drawn from, in m/s, or one "
                                             "speed for every drive (default 0.9,1.8)")
-    p.add_argument("--steer-noise", type=float, default=0.25,
-                   help="how hard the applied steering is disturbed; 0 records perfect driving only")
+    p.add_argument("--steer-noise", type=float,
+                   help="how hard the applied steering is disturbed; 0 records perfect driving only "
+                        "(default 0.25 when the teacher drives, 0 when a network does)")
+    p.add_argument("--driver", choices=("teacher", "cnn"), default="teacher",
+                   help="who drives: the teacher, or a trained network (--checkpoint) that the teacher labels: DAgger")
+    p.add_argument("--checkpoint", help="with --driver cnn: a trained version (v1) or a checkpoint file")
+    p.add_argument("--beta", type=float, default=0.0,
+                   help="with --driver cnn: the share of ticks the teacher drives instead (default 0)")
     p.add_argument("--seed", type=int, default=0,
                    help="the same seed records the same drives; change it with --name to get new ones")
     p.add_argument("--show", action="store_true",
@@ -204,18 +269,33 @@ def add_parser(sub):
 
 
 def run(project: Project, args) -> int:
-    print(f"recording {args.episodes} drives of {args.duration_s:.0f} s to {project.episodes}")
-    done = collect(project.episodes, args.episodes, args.duration_s, tuple(args.tracks), args.steer_noise,
-                   args.name, seed=args.seed, show=args.show, video=args.video, speeds=args.speeds)
-    print(f"{done['frames']} frames in {done['episodes']} episodes; the disturbed car strayed up to "
-          f"{100 * done['max_lateral_m']:.0f} cm from the centerline")
+    driver = None
+    if args.driver == "cnn":
+        if not args.checkpoint:
+            raise ValueError("--driver cnn needs --checkpoint, a trained version (v1) or a checkpoint file")
+        driver = project.checkpoint(args.checkpoint)
+    elif args.checkpoint or args.beta:
+        raise ValueError("--checkpoint and --beta are for --driver cnn")
+    if not 0.0 <= args.beta <= 1.0:
+        raise ValueError(f"--beta is a share of the ticks, from 0 to 1, not {args.beta}")
+    noise = args.steer_noise if args.steer_noise is not None else (0.25 if driver is None else 0.0)
+    print(f"recording {args.episodes} drives of {args.duration_s:.0f} s to {project.episodes}"
+          + (f", driven by {driver}" + (f" ({100 * args.beta:.0f} % of the ticks by the teacher)" if args.beta else "")
+             + "; the teacher labels every frame (DAgger)" if driver else ""))
+    done = collect(project.episodes, args.episodes, args.duration_s, tuple(args.tracks), noise,
+                   args.name, seed=args.seed, show=args.show, video=args.video, speeds=args.speeds,
+                   driver=driver, beta=args.beta)
+    print(f"{done['frames']} frames in {done['episodes']} episodes; the {'disturbed ' if driver is None else ''}car "
+          f"strayed up to {100 * done['max_lateral_m']:.0f} cm from the centerline")
     share = 100 * done["off_road_frames"] / max(done["frames"], 1)
     print(f"  {done['off_road_frames']} frames ({share:.1f} %) were recorded with the car off the road")
     if share > 5:
         # A few frames off the road teach coming back; many teach driving on grass, where the teacher,
         # who knows the map, still has a plan that the picture cannot explain.
         print(f"  WARN  that is a lot: the disturbance is stronger than the teacher can correct. "
-              f"Lower --steer-noise (now {args.steer_noise:g})")
+              f"Lower --steer-noise (now {noise:g})" if driver is None else
+              "  WARN  that is a lot: the network leaves the road and the frames show grass the teacher's labels "
+              "cannot explain. Give the teacher a share of the ticks: --beta 0.3")
     if args.video:
         print(f"  video: {args.video}")
     return 0

@@ -2,12 +2,18 @@
 
     ./drive.sh probe v1 layers       every layer: output shape, parameters, how much of the image one unit sees
     ./drive.sh probe v1 history      the training curves, and what they say: still learning? overfitting?
+    ./drive.sh probe v1 training     inside training: gradient size, update/weight ratio, dead units, per epoch
     ./drive.sh probe v1 errors       accuracy on the held-out episodes: per step of the plan, per kind of
                                      road, against two baselines; the worst frames, drawn
     ./drive.sh probe v1 activations  what each layer outputs; units that never fire; the feature maps, drawn
     ./drive.sh probe v1 saliency     which part of the image the steering depends on, drawn as a heat map
+    ./drive.sh probe v1 ablation     what each input is worth: the error with the picture, the speed or the
+                                     steering state replaced by its average
     ./drive.sh probe v1 behaviour    mirror the image, dim it, blank it, change the speed: does it react
                                      as a driver should?
+    ./drive.sh probe v1 onpolicy     let it drive, and ask the teacher at every tick what it would steer:
+                                     the error where the model takes the car, against the distance off-centre
+    ./drive.sh probe v1 report       all of the above in one HTML page, with charts
 
 Run it with the project the model was trained on: `errors`, `activations` and `behaviour`
 use the same held-out episodes as training did. Pictures go to <project>/probe/<model>/.
@@ -26,7 +32,8 @@ from . import dataset as datasets
 from .label import episodes, read_labels
 from .project import Project, add_project_argument
 
-WHAT = ("layers", "history", "errors", "activations", "saliency", "behaviour")
+WHAT = ("layers", "history", "training", "errors", "ablation", "activations", "saliency", "behaviour", "onpolicy",
+        "report")
 MAGENTA, CYAN, WHITE = (240, 80, 210), (60, 220, 240), (240, 240, 240)
 #: Bins of the label's first steering command: the kind of road the frame is on.
 ROADS = (("straight", 0.0, 0.1), ("gentle bend", 0.1, 0.3), ("sharp bend", 0.3, 1.01))
@@ -106,7 +113,8 @@ def describe(module) -> str:
 
 
 def named_layers(model) -> list[tuple[str, object]]:
-    return [(f"vision.{i}", m) for i, m in enumerate(model.vision)] + [(f"head.{i}", m) for i, m in enumerate(model.head)]
+    from .model import named_layers as names
+    return names(model)
 
 
 def outputs(model, images: np.ndarray, states: np.ndarray) -> dict:
@@ -219,6 +227,62 @@ def history(report: dict, log=print, baseline: float | None = None) -> dict:
     return {"best_epoch": best["epoch"], "verdicts": verdicts, "average_plan_val_loss": baseline}
 
 
+# --- training --------------------------------------------------------------------------
+
+#: An update moves a weight matrix by about this fraction of its size when learning goes well
+#: (a rule of thumb from Karpathy, "A Recipe for Training Neural Networks", 2019).
+HEALTHY_UPDATE = 1e-3
+
+
+def training(report: dict, log=print) -> dict:
+    """Per epoch: the learning rate, gradient norms, update/weight ratios and dead units the training recorded."""
+    h = report["history"]
+    if "grad_norm" not in h[0]:
+        raise ValueError("this model was trained before train.py recorded what happens inside training; "
+                         "train it again (with the same seed it learns the same weights)")
+    layers = list(h[0]["grad_norm"])
+    shown = [layers[0], layers[len(layers) // 2 - 1], layers[-3], layers[-1]] if len(layers) > 4 else layers
+    relus = list(h[0]["dead"])
+    log("gradient norm, the mean per step: how hard the loss pulls on each layer's weights")
+    log(f"  {'epoch':>5} {'lr':>9}   " + "  ".join(f"{name:>9}" for name in shown))
+    for e in h:
+        log(f"  {e['epoch']:>5} {e['lr']:>9.2e}   " + "  ".join(f"{e['grad_norm'][n]:>9.3g}" for n in shown))
+    log("update / weight: how far one step moves each weight matrix, against its size (healthy: about 1e-3)")
+    log(f"  {'epoch':>5}   " + "  ".join(f"{name:>9}" for name in shown))
+    for e in h:
+        log(f"  {e['epoch']:>5}   " + "  ".join(f"{e['update_ratio'][n]:>9.1e}" for n in shown))
+    log("units that never fire on the validation frames (dead ReLU), per layer")
+    log(f"  {'epoch':>5}   " + "  ".join(f"{name:>9}" for name in relus))
+    for e in h:
+        log(f"  {e['epoch']:>5}   " + "  ".join(f"{100 * e['dead'][n]:>8.0f}%" for n in relus))
+
+    first, last = h[0], h[-1]
+    verdicts = []
+    early = max(first["update_ratio"].values())
+    if early > 10 * HEALTHY_UPDATE:
+        verdicts.append(f"STEPS TOO BIG: in the first epoch a step moved a layer by {early:.0e} of its size, "
+                        f"{early / HEALTHY_UPDATE:.0f}x the healthy 1e-3. Lower the learning rate")
+    elif early < HEALTHY_UPDATE / 10:
+        verdicts.append(f"STEPS TOO SMALL: in the first epoch the biggest step moved a layer by {early:.0e} of its "
+                        "size, far below 1e-3. Raise the learning rate")
+    jump = max(last["dead"][n] - first["dead"][n] for n in relus)
+    worst = max(relus, key=lambda n: last["dead"][n])
+    if last["dead"][worst] >= 0.999:
+        verdicts.append(f"A DEAD LAYER: every unit of {worst} is silent, so nothing reaches the layers after it")
+    elif last["dead"][worst] > 0.5:
+        verdicts.append(f"MANY DEAD UNITS: {100 * last['dead'][worst]:.0f} % of {worst} never fire; capacity is wasted "
+                        "(often a learning rate that was high early on)")
+    if first["grad_norm"][layers[0]] > 0 and last["grad_norm"][layers[0]] / first["grad_norm"][layers[0]] < 1e-3:
+        verdicts.append(f"VANISHING: the gradient reaching {layers[0]} fell a thousandfold; the first layers stopped "
+                        "learning")
+    if not verdicts:
+        verdicts.append(f"HEALTHY: steps of {early:.0e} at the start, shrinking as the learning rate decays; "
+                        f"{100 * last['dead'][worst]:.0f} % of {worst} dead at most")
+    for v in verdicts:
+        log("  " + v)
+    return {"verdicts": verdicts, "dead_jump": jump}
+
+
 # --- errors ----------------------------------------------------------------------------
 
 def draw_frame(frame: dict, plan_model: np.ndarray, plan_dt: float, title: str, extra: list[str]) -> np.ndarray:
@@ -306,8 +370,112 @@ def errors(project: Project, model, info: dict, out: Path, worst: int = 5, log=p
             f"mean error {err[i, :, 0].mean():.3f}   {path.name}")
         worst_frames.append({"episode": name, "frame": index, "steer_error": float(err[i, :, 0].mean())})
     log(f"  see them in context: ./drive.sh browse --project {project.home} --match {names[int(validation.episode[order[0]])]}")
-    return {"held_out": held, "frames": len(label), "overall": overall, "per_step_steer": err[..., 0].mean(axis=0).tolist(),
+    return {"held_out": held, "frames": len(label), "overall": overall, "plan_dt": dt,
+            "per_step_steer": err[..., 0].mean(axis=0).tolist(),
+            "per_step_average": average[..., 0].mean(axis=0).tolist(), "per_step_keep": keep.mean(axis=0).tolist(),
             "roads": roads, "worst": worst_frames}
+
+
+# --- ablation --------------------------------------------------------------------------
+
+def ablation(project: Project, model, info: dict, log=print) -> dict:
+    """How much worse the plan gets when one input is replaced by its average: what each input is worth."""
+    validation, _ = held_out(project, info["image_hw"])
+    images, states = validation.images, validation.states.astype(np.float32)
+    label = validation.plans.astype(np.float64)
+
+    def score(pictures, measured) -> tuple[float, float]:
+        pred = predict(model, pictures, measured)
+        return float(np.abs(pred[..., 0] - label[..., 0]).mean()), float(np.abs(pred[..., 1] - label[..., 1]).mean())
+
+    average_picture = np.broadcast_to(images.mean(axis=0).round().astype(np.uint8), images.shape)
+    cases = [("nothing (the model as it is)", images, states),
+             ("the picture", average_picture, states),
+             ("the speed", images, np.column_stack([np.full(len(states), states[:, 0].mean()), states[:, 1]])),
+             ("the steering state", images, np.column_stack([states[:, 0], np.full(len(states), states[:, 1].mean())]))]
+    log(f"each input in turn replaced by its average over the {len(label)} held-out frames; "
+        "the worse the plan gets, the more the model relies on that input")
+    log(f"  {'replaced':<30} {'steer error':>11} {'':>6} {'throttle error':>14}")
+    result, base = {}, None
+    for name, pictures, measured in cases:
+        steer, throttle = score(pictures, measured.astype(np.float32))
+        base = base or (steer, throttle)
+        result[name] = {"steer": steer, "throttle": throttle}
+        log(f"  {name:<30} {steer:>11.4f} {steer / base[0]:>5.1f}x {throttle:>14.4f} {throttle / base[1]:>5.1f}x")
+    picture = result["the picture"]["steer"] / base[0]
+    log(f"  the steering comes from the picture: without it the error is {picture:.0f}x"
+        if picture > 3 else "  WEAK PICTURE: the steering barely needs the image; it leans on the state")
+    return result
+
+
+# --- on-policy -------------------------------------------------------------------------
+
+#: Bins of the distance from the centerline, in metres; the road's edge is at 0.45.
+OFFSETS = ((0.0, 0.02), (0.02, 0.05), (0.05, 0.10), (0.10, 0.20), (0.20, 0.45), (0.45, 1e9))
+
+
+def onpolicy(project: Project, path: Path, model, info: dict, duration_s: float = 40.0, log=print) -> dict:
+    """Let the model drive every track both ways and ask the teacher, at every tick, what it would steer.
+
+    Offline errors are measured where the teacher drove; this measures them where the model drives,
+    which is where its own mistakes take it (covariate shift, DAgger's reason to exist).
+    """
+    from ..episode import EpisodeConfig, build
+    from ..policy.pure_pursuit import PurePursuitPolicy
+    from ..sim import SHAPES
+    validation, _ = held_out(project, info["image_hw"])
+    offline = float(np.abs(predict(model, validation.images, validation.states)[:, 0, 0]
+                           - validation.plans[:, 0, 0]).mean())
+    errors_, offsets, drives = [], [], []
+    for track in SHAPES:
+        for reverse in (False, True):
+            world, loop = build(EpisodeConfig(policy="cnn", checkpoint=str(path), track=track, reverse=reverse,
+                                              duration_s=duration_s))
+            teacher = PurePursuitPolicy(world.track, world.vehicle)
+            mine = []
+            try:
+                while world.t < duration_s - 1e-9:
+                    wanted = teacher.act(world.state)[0]
+                    lateral = abs(world.track.project(world.state.x, world.state.y)[1])
+                    tick = loop.step()
+                    if tick.command is not None:
+                        mine.append(abs(tick.command[0] - wanted))
+                        offsets.append(lateral)
+            finally:
+                loop.worker.close()
+            errors_ += mine
+            drives.append((f"{track}{' reversed' if reverse else ''}", float(np.mean(mine))))
+    errors_, offsets = np.array(errors_), np.array(offsets)
+    mean = float(errors_.mean())
+    log(f"{len(drives)} drives of {duration_s:.0f} s with the model at the wheel; at every tick (50 a second) the "
+        "teacher, who knows the map, says what it would steer from where the car is")
+    log("  " + "   ".join(f"{name} {e:.3f}" for name, e in drives))
+    log(f"  mean |model steer - teacher steer| on its own drives: {mean:.4f}; on the recorded held-out frames "
+        f"(step 0): {offline:.4f}, so {mean / offline:.1f}x")
+    log("by distance from the centerline (the road's edge is at 45 cm)")
+    log(f"  {'off-centre':<12} {'time':>6} {'steer error':>11}")
+    bins = []
+    for low, high in OFFSETS:
+        pick = (offsets >= low) & (offsets < high)
+        label = f"{100 * low:.0f}-{100 * high:.0f} cm" if high < 1 else "off the road"
+        share = float(pick.mean())
+        error = float(errors_[pick].mean()) if pick.any() else None
+        bins.append({"bin": label, "share": share, "steer_error": error})
+        log(f"  {label:<12} {100 * share:>5.1f}% " + (f"{error:>11.4f}" if error is not None else f"{'-':>11}"))
+    verdicts = []
+    if mean > 2 * offline:
+        verdicts.append(f"COMPOUNDING: on its own path the model is {mean / offline:.1f}x worse than on recorded frames. "
+                        "Its mistakes take it where the data never went (covariate shift). Record where it goes and "
+                        "let the teacher label it: ./drive.sh collect --driver cnn --checkpoint …  (DAgger)")
+    far = [b for b in bins[2:] if b["steer_error"] is not None and b["share"] > 0.01]
+    if far and bins[0]["steer_error"] and max(b["steer_error"] for b in far) > 3 * bins[0]["steer_error"]:
+        verdicts.append("LOST WHEN OFF-CENTRE: the error grows with the distance from the centerline, so it does not "
+                        "know how to come back")
+    if not verdicts:
+        verdicts.append("CONSISTENT: on its own path the model is about as accurate as on the recorded frames")
+    for v in verdicts:
+        log("  " + v)
+    return {"mean": mean, "offline": offline, "drives": drives, "bins": bins, "verdicts": verdicts}
 
 
 # --- activations -----------------------------------------------------------------------
@@ -476,6 +644,131 @@ def behaviour(project: Project, model, info: dict, frame: dict, log=print) -> di
     return result
 
 
+# --- the HTML report -------------------------------------------------------------------
+
+PALETTE = ("#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c")
+
+
+def svg_lines(series: dict, title: str, xlabel: str, log_y: bool = False, width: int = 640, height: int = 260) -> str:
+    """A line chart as inline SVG: {name: (xs, ys)}, no plotting library needed."""
+    import math
+    left, right, top, bottom = 64, 150, 30, 40
+    xs = [x for xs_, _ in series.values() for x in xs_]
+    ys = [y for _, ys_ in series.values() for y in ys_ if y is not None and (y > 0 or not log_y)]
+    if not xs or not ys:
+        return ""
+    f = (lambda v: math.log10(v)) if log_y else (lambda v: v)
+    x0, x1 = min(xs), max(xs) if max(xs) > min(xs) else min(xs) + 1
+    y0, y1 = f(min(ys)), f(max(ys))
+    if y1 - y0 < 1e-12:
+        y0, y1 = y0 - 1, y1 + 1
+    if not log_y:
+        y0 = min(0.0, y0)
+
+    def px(x, y):
+        return (left + (x - x0) / (x1 - x0) * (width - left - right),
+                top + (1 - (f(y) - y0) / (y1 - y0)) * (height - top - bottom))
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" font-family="sans-serif" '
+             f'font-size="11"><text x="{left}" y="18" font-size="13" font-weight="bold">{title}</text>',
+             f'<rect x="{left}" y="{top}" width="{width - left - right}" height="{height - top - bottom}" '
+             'fill="none" stroke="#bbb"/>']
+    ticks = [y0 + (y1 - y0) * k / 4 for k in range(5)]
+    for t in ticks:
+        value = 10 ** t if log_y else t
+        y = top + (1 - (t - y0) / (y1 - y0)) * (height - top - bottom)
+        parts.append(f'<line x1="{left}" x2="{width - right}" y1="{y:.1f}" y2="{y:.1f}" stroke="#eee"/>'
+                     f'<text x="{left - 6}" y="{y + 4:.1f}" text-anchor="end">{value:.3g}</text>')
+    for k in range(5):
+        x = x0 + (x1 - x0) * k / 4
+        parts.append(f'<text x="{px(x, 10 ** y0 if log_y else y0)[0]:.1f}" y="{height - bottom + 16}" '
+                     f'text-anchor="middle">{x:.3g}</text>')
+    parts.append(f'<text x="{(left + width - right) / 2}" y="{height - 6}" text-anchor="middle">{xlabel}</text>')
+    for k, (name, (xs_, ys_)) in enumerate(series.items()):
+        colour = PALETTE[k % len(PALETTE)]
+        points = " ".join("%.1f,%.1f" % px(x, y) for x, y in zip(xs_, ys_) if y is not None and (y > 0 or not log_y))
+        parts.append(f'<polyline points="{points}" fill="none" stroke="{colour}" stroke-width="2"/>')
+        parts.append(f'<rect x="{width - right + 12}" y="{top + 16 * k}" width="12" height="3" fill="{colour}"/>'
+                     f'<text x="{width - right + 28}" y="{top + 16 * k + 5}">{name}</text>')
+    return "".join(parts) + "</svg>"
+
+
+def html_report(project: Project, path: Path, model, info: dict, out: Path, frame_ref: str | None = None,
+                worst: int = 5, duration_s: float = 40.0) -> Path:
+    """Every probe on one page: the text each prints, with charts and the pictures they draw."""
+    import html
+    import io
+    import re
+    from contextlib import redirect_stdout
+    out.mkdir(parents=True, exist_ok=True)
+    sections, verdicts = [], []
+
+    def run_probe(title: str, call, chart: str = "", pictures=()):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            try:
+                result = call(print)
+            except ValueError as error:
+                print(f"(skipped: {error})")
+                result = None
+        text = buffer.getvalue()
+        # a verdict is a line with a word in capitals: HEALTHY, STEPS TOO BIG, DRIVES TOWARDS, ...
+        verdicts.extend(f"{title}: {line.strip()}" for line in text.splitlines()
+                        if re.search(r"\b[A-Z]{4,}(?: [A-Z]{2,})*\b", line))
+        images = "".join(f'<img src="{Path(p).name}" alt="{html.escape(Path(p).name)}">' for p in pictures if p)
+        sections.append(f"<section><h2>{html.escape(title)}</h2>{chart}<pre>{html.escape(text)}</pre>{images}</section>")
+        return result
+
+    report = training_report(project, path, info)
+    h = report["history"]
+    epochs = [e["epoch"] for e in h]
+    curves = {"train loss": (epochs, [e["train_loss"] for e in h]), "validation loss": (epochs, [e["val_loss"] for e in h])}
+    if report.get("average_plan_val_loss"):
+        curves["average plan"] = (epochs, [report["average_plan_val_loss"]] * len(epochs))
+    run_probe("Layers", lambda log: layers(model, info, log))
+    run_probe("Training curves", lambda log: history(report, log), svg_lines(curves, "loss per epoch", "epoch", log_y=True))
+    if "grad_norm" in h[0]:
+        ratios = {name: (epochs, [e["update_ratio"][name] for e in h]) for name in list(h[0]["update_ratio"])[::3]}
+        ratios["healthy 1e-3"] = (epochs, [HEALTHY_UPDATE] * len(epochs))
+        run_probe("Inside training", lambda log: training(report, log),
+                  svg_lines(ratios, "update / weight per step", "epoch", log_y=True))
+    found = run_probe("Errors on held-out episodes", lambda log: errors(project, model, info, out, worst, log))
+    if found:
+        steps = [k * found["plan_dt"] for k in range(len(found["per_step_steer"]))]
+        sections[-1] = sections[-1].replace("<pre>", svg_lines(
+            {"model": (steps, found["per_step_steer"]), "keep": (steps, found["per_step_keep"]),
+             "average": (steps, found["per_step_average"])}, "steer error per step of the plan", "seconds ahead") + "<pre>", 1)
+        sections[-1] = sections[-1].replace("</section>", "".join(
+            f'<img src="worst-{k}-{w["episode"]}-{w["frame"]:04d}.png" alt="worst {k}">'
+            for k, w in enumerate(found["worst"][:3], 1)) + "</section>")
+    run_probe("What each input is worth", lambda log: ablation(project, model, info, log))
+    frame = pick_frame(project, frame_ref, info["image_hw"])
+    run_probe("Behaviour", lambda log: behaviour(project, model, info, frame, log))
+    seen = run_probe("Activations", lambda log: activations(project, model, info, frame, out, log))
+    run_probe("Saliency", lambda log: saliency(model, info, frame, out, log=log),
+              pictures=[out / f"saliency-{frame['name']}-{frame['index']:04d}.png"])
+    if seen:
+        sections[-2] = sections[-2].replace("</section>", f'<img src="{Path(seen["picture"]).name}" alt="activations"></section>')
+    driven = run_probe("On its own drives", lambda log: onpolicy(project, path, model, info, duration_s, log=log))
+    if driven:
+        middle = [i for i, b in enumerate(driven["bins"]) if b["steer_error"] is not None]
+        sections[-1] = sections[-1].replace("<pre>", svg_lines(
+            {"steer error": (middle, [driven["bins"][i]["steer_error"] for i in middle])},
+            "steer error against distance off-centre (bins 0: <2 cm ... 5: off the road)", "bin") + "<pre>", 1)
+
+    summary = "".join(f"<li>{html.escape(v)}</li>" for v in verdicts)
+    page = out / "report.html"
+    page.write_text(f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{html.escape(path.stem)}: probe report</title>
+<style>body{{font-family:sans-serif;max-width:1100px;margin:2em auto;color:#222}}pre{{background:#f6f6f6;
+padding:10px;overflow-x:auto;font-size:12px}}img{{max-width:100%;margin:6px 0;display:block}}section{{margin-bottom:2em}}
+h2{{border-bottom:1px solid #ddd}}li{{margin:4px 0}}</style></head>
+<body><h1>{html.escape(path.stem)}</h1><p>{html.escape(str(path))}, project {html.escape(str(project.home))}.
+Every section is the output of <code>./drive.sh probe {html.escape(path.stem)} &lt;what&gt;</code>.</p>
+<h2>Verdicts</h2><ul>{summary}</ul>{''.join(sections)}</body></html>
+""")
+    return page
+
+
 # --- the stage -------------------------------------------------------------------------
 
 def add_parser(sub):
@@ -489,6 +782,7 @@ def add_parser(sub):
                         "(default: the sharpest bend in the first held-out episode)")
     p.add_argument("--worst", type=int, default=5, help="errors: how many of the worst frames to list and draw")
     p.add_argument("--out", type=Path, help="where pictures go (default <project>/probe/<model>)")
+    p.add_argument("--duration-s", type=float, default=40.0, help="onpolicy and report: seconds per drive (default 40)")
 
 
 def run(project: Project, args) -> int:
@@ -500,19 +794,18 @@ def run(project: Project, args) -> int:
     out = args.out or project.home / "probe" / path.stem
     if args.what == "layers":
         layers(model, info)
-    elif args.what == "history":
-        report = path.with_suffix(".json")
-        report = json.loads(report.read_text()) if report.is_file() else info["report"]
-        baseline = None
-        if "average_plan_val_loss" not in report:        # trained before train.py logged it
-            from .train import average_plan_loss
-            try:
-                baseline = average_plan_loss(*datasets.split_plans(project.episodes))
-            except ValueError:
-                pass                                      # no episodes here: judge the curves alone
-        history(report, baseline=baseline)
+    elif args.what in ("history", "training"):
+        report = training_report(project, path, info)
+        history(report) if args.what == "history" else training(report)
     elif args.what == "errors":
         errors(project, model, info, out, args.worst)
+    elif args.what == "ablation":
+        ablation(project, model, info)
+    elif args.what == "onpolicy":
+        onpolicy(project, path, model, info, args.duration_s)
+    elif args.what == "report":
+        page = html_report(project, path, model, info, out, args.frame, args.worst, args.duration_s)
+        print(f"report: {page}")
     else:
         frame = pick_frame(project, args.frame, info["image_hw"])
         if args.what == "activations":
@@ -522,3 +815,16 @@ def run(project: Project, args) -> int:
         else:
             behaviour(project, model, info, frame)
     return 0
+
+
+def training_report(project: Project, path: Path, info: dict) -> dict:
+    """The training report beside the checkpoint, with the average plan's loss worked out if it predates it."""
+    report = path.with_suffix(".json")
+    report = json.loads(report.read_text()) if report.is_file() else info["report"]
+    if "average_plan_val_loss" not in report:            # trained before train.py logged it
+        from .train import average_plan_loss
+        try:
+            report = {**report, "average_plan_val_loss": round(average_plan_loss(*datasets.split_plans(project.episodes)), 5)}
+        except ValueError:
+            pass                                          # no episodes here: judge the curves alone
+    return report

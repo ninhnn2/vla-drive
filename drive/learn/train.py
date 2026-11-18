@@ -61,7 +61,7 @@ def train(data: Path, out: Path, epochs: int = 15, batch: int = 128, lr: float =
     `augmentation` False trains on the frames as recorded: no mirroring, no brightness change.
     """
     import torch
-    from .model import ChunkNet, save
+    from .model import ChunkNet, named_layers, save
 
     device = device or pick_device(log)
     torch.manual_seed(seed)
@@ -83,18 +83,40 @@ def train(data: Path, out: Path, epochs: int = 15, batch: int = 128, lr: float =
     loss_fn = torch.nn.SmoothL1Loss(beta=0.05)
     generator = torch.Generator(device=device).manual_seed(seed)
 
-    def check() -> tuple[float, float]:
-        """(loss, mean |steer error|) on the held-out episodes."""
+    # What happens inside training, per epoch: how big the gradients are, how far each step moves
+    # the weights against their size, and how many units never fire. Read with `probe … training`.
+    weighted = [(name, m) for name, m in named_layers(model) if isinstance(m, (torch.nn.Conv2d, torch.nn.Linear))]
+    relus = [(name, m) for name, m in named_layers(model) if isinstance(m, torch.nn.ReLU)]
+
+    def check() -> tuple[float, float, dict]:
+        """(loss, mean |steer error|, {ReLU: fraction of its units that never fire}) on the held-out episodes."""
         model.eval()
-        with torch.no_grad():
-            out = torch.cat([model(held[0][i:i + 512], held[1][i:i + 512]) for i in range(0, len(held[0]), 512)])
-        return float(loss_fn(out, held[2])), float((out[..., 0] - held[2][..., 0]).abs().mean())
+        peak = {}
+
+        def remember(name):
+            def hook(module, inputs, out):
+                top = out.amax(dim=(0, 2, 3) if out.dim() == 4 else 0)
+                peak[name] = top if name not in peak else torch.maximum(peak[name], top)
+            return hook
+
+        hooks = [m.register_forward_hook(remember(name)) for name, m in relus]
+        try:
+            with torch.no_grad():
+                out = torch.cat([model(held[0][i:i + 512], held[1][i:i + 512]) for i in range(0, len(held[0]), 512)])
+        finally:
+            for hook in hooks:
+                hook.remove()
+        dead = {name: round(float((top <= 0).float().mean()), 3) for name, top in peak.items()}
+        return float(loss_fn(out, held[2])), float((out[..., 0] - held[2][..., 0]).abs().mean()), dead
 
     history = []
     for epoch in range(1, epochs + 1):
         model.train()
         order = torch.randperm(len(images), device=device, generator=generator)
         total = 0.0
+        rate = schedule.get_last_lr()[0]
+        grad_sum = torch.zeros(len(weighted), device=device)        # summed on the device: no sync per step
+        ratio_sum = torch.zeros(len(weighted), device=device)
         for i in range(0, len(order), batch):
             pick = order[i:i + batch]
             if augmentation:
@@ -104,12 +126,22 @@ def train(data: Path, out: Path, epochs: int = 15, batch: int = 128, lr: float =
             loss = loss_fn(model(x, s), y)
             optimizer.zero_grad()
             loss.backward()
+            before = [m.weight.detach().clone() for _, m in weighted]
             optimizer.step()
+            with torch.no_grad():
+                grad_sum += torch.stack([m.weight.grad.norm() for _, m in weighted])
+                ratio_sum += torch.stack([(m.weight - w).norm() / (w.norm() + 1e-12)
+                                          for (_, m), w in zip(weighted, before)])
             total += float(loss) * len(pick)
+        steps = (len(order) + batch - 1) // batch
         schedule.step()
-        val_loss, steer_error = check()
+        val_loss, steer_error, dead = check()
         history.append({"epoch": epoch, "train_loss": round(total / len(order), 5),
-                        "val_loss": round(val_loss, 5), "val_steer_error": round(steer_error, 4)})
+                        "val_loss": round(val_loss, 5), "val_steer_error": round(steer_error, 4),
+                        "lr": float(f"{rate:.4g}"),
+                        "grad_norm": {name: float(f"{v:.4g}") for (name, _), v in zip(weighted, (grad_sum / steps).tolist())},
+                        "update_ratio": {name: float(f"{v:.4g}") for (name, _), v in zip(weighted, (ratio_sum / steps).tolist())},
+                        "dead": dead})
         log(f"  epoch {epoch:2d}/{epochs}: train {history[-1]['train_loss']:.5f}   "
             f"validation {val_loss:.5f}   steer error {steer_error:.4f}")
 
