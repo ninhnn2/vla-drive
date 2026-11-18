@@ -28,7 +28,7 @@ import numpy as np
 
 from drive.learn.label import episodes, read_labels
 from drive.learn.project import Project
-from drive.policy.lerobot_backend import LeRobotBackend
+from drive.policy.lerobot_backend import LeRobotBackend, synchronize
 from drive.policy.vla import BackendObservation
 
 
@@ -51,13 +51,14 @@ def main() -> int:
                         help="held-out episodes (LeRobot's eval_split=0.1 holds out the last 9: sim2-031 … sim2-039)")
     parser.add_argument("--every", type=int, default=10, help="use every Nth frame of each episode")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--device", help="cuda, mps or cpu (default: the fastest there is; or $VLA_DEVICE)")
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
     checkpoint = Project(args.project).checkpoint(args.checkpoint)
     started = time.perf_counter()
-    backend = LeRobotBackend(checkpoint)
-    print(f"loaded {checkpoint} in {time.perf_counter() - started:.1f} s; chunk {backend.config.chunk_size}, "
+    backend = LeRobotBackend(checkpoint, args.device)
+    print(f"loaded {checkpoint} on {backend.device} in {time.perf_counter() - started:.1f} s; chunk {backend.config.chunk_size}, "
           f"{backend.config.num_steps} denoising steps, camera key {backend.camera!r}")
 
     found = [e for e in episodes(args.project / "episodes") if fnmatch(e.name, args.episodes)]
@@ -117,11 +118,11 @@ def main() -> int:
     for n in (1, 10):
         backend.policy.config.num_steps = n
         chunk(backend, image, speed, steer, noise=fixed)                       # warm up
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        synchronize(torch, backend.device)
         t0 = time.perf_counter()
         for _ in range(10):
             chunk(backend, image, speed, steer, noise=fixed)
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        synchronize(torch, backend.device)
         timings[n] = (time.perf_counter() - t0) / 10
     backend.policy.config.num_steps = 10
     per_step = (timings[10] - timings[1]) / 9

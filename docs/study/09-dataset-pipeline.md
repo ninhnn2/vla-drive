@@ -303,7 +303,7 @@ This is the stage that replaces annotation. Nobody draws labels; somebody must s
 | **Input** | model versions, checkpoint files, or `pure-pursuit` / `lane-camera` |
 | **Output** | `reports/<name>.json`, a per-drive table, a comparison; exit code 0 only if every drive of every model passed |
 | **Source** | [`evaluate`](../../drive/learn/evaluate.py#L22); details in [chapter 11](11-model-evaluation.md) |
-| **CLI** | `./drive.sh evaluate MODEL [MODEL …] [--project DIR] [--tracks peanut,oval,trefoil] [--duration-s 40] [--latency-ms 100]` |
+| **CLI** | `./drive.sh evaluate MODEL [MODEL …] [--project DIR] [--tracks peanut,oval,trefoil] [--duration-s 40] [--latency-ms 100] [--max-plan-age-ms 600]` |
 
 ### 7. `status`
 

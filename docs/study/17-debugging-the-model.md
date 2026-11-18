@@ -61,6 +61,17 @@ export V=$D/.venv/bin/python PYTHONPATH=.
 cd /home/fanning/data1/AI_SOURCE/vla-drive
 ```
 
+**On a Mac (or anywhere, without that folder):** `make vla-setup` makes the environment
+in `.venv-vla`, and `./vla.sh` stands for `$V` with `PYTHONPATH=.` set, so `$V tools/see_vla.py`
+becomes `./vla.sh tools/see_vla.py`. The model runs on the Apple GPU (MPS); each tool takes
+`--device` (or `VLA_DEVICE`) to choose, and running one frame on `mps` and on `cpu` is how
+to check that the GPU computes what the CPU does (the MPS bug in
+[docs/thuc-hanh, lesson 6](../thuc-hanh/06-debug-model.md) was found that way). Measured on
+an M3 (10-core GPU, 16 GB), LeRobot 0.5.1: one chunk with 10 denoising steps takes about
+360 ms, `see_vla.py` about 30 s per frame with two noises, and the web app answers in about
+1 s. The whole route on a Mac, with outputs, is
+[docs/thuc-hanh/08-vla-tren-mac.md](../thuc-hanh/08-vla-tren-mac.md).
+
 ---
 
 ## 1 · Debug the data before the model

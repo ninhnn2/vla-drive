@@ -54,11 +54,11 @@ STEPS_PLAYED = 4                               # chunk steps the executor plays 
 class Lab:
     """The model, the statistics it was normalised with, and a lock: Gradio serves from threads."""
 
-    def __init__(self, project: Path, checkpoint: str):
+    def __init__(self, project: Path, checkpoint: str, device: str | None = None):
         self.project = Project(project)
         path = self.project.checkpoint(checkpoint)
         self.name = Path(checkpoint).name
-        self.seer = Seer(path)
+        self.seer = Seer(path, device)
         self.dt = chunk_dt_s(path)
         self.default_steps = self.seer.config.num_steps
         self.camera = Camera(CameraParams())
@@ -370,10 +370,11 @@ def main() -> int:
     parser.add_argument("--checkpoint", default="smolvla-v1", help="a version in <project>/vla, or a checkpoint directory")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--open", action="store_true", help="open it in the browser")
+    parser.add_argument("--device", help="cuda, mps or cpu (default: the fastest there is; or $VLA_DEVICE)")
     args = parser.parse_args()
     started = time.perf_counter()
-    lab = Lab(args.project, args.checkpoint)
-    print(f"loaded {args.checkpoint} in {time.perf_counter() - started:.1f} s")
+    lab = Lab(args.project, args.checkpoint, args.device)
+    print(f"loaded {args.checkpoint} on {lab.seer.backend.device} in {time.perf_counter() - started:.1f} s")
     build(lab).launch(server_name="127.0.0.1", server_port=args.port, inbrowser=args.open, show_error=True)
     return 0
 

@@ -41,7 +41,7 @@ POLICY ?= pure-pursuit
 NAME ?= ros
 ARGS ?=
 
-.PHONY: help setup build shell test ros-test gui sim collect label validate browse train evaluate status \
+.PHONY: help setup vla-setup build shell test ros-test gui sim collect label validate browse train evaluate status \
         ros-build ros-sim ros-drive ros-teleop ros-record ros-launch ros-view
 
 help:
@@ -63,6 +63,7 @@ endif
 	@echo "              make ros-record [NAME=ros]           record the drive; Ctrl-C saves"
 	@echo "              make ros-view                        rqt_image_view on the camera"
 	@echo "            or all at once: make ros-launch [ARGS='policy:=cnn checkpoint:=v1 record:=true']"
+	@echo "VLA         make vla-setup, then ./vla.sh tools/probe_vla.py | tools/see_vla.py | tools/vla_app.py --open"
 
 # numpy, OpenCV and PyTorch in .venv, on the Python the container has (3.10). Needs uv.
 setup: $(VENV)/.installed
@@ -71,6 +72,23 @@ $(VENV)/.installed: requirements.txt
 	@command -v uv >/dev/null || { echo "make setup needs uv: brew install uv" >&2; exit 1; }
 	uv venv --allow-existing --python 3.10 $(VENV)
 	uv pip install --python $(VENV)/bin/python -r requirements.txt
+	@touch $@
+
+# The fine-tuned VLA: LeRobot in its own environment, .venv-vla (Python 3.12), outside the
+# container on every platform; on a Mac it runs on the Apple GPU. ./vla.sh runs its Python.
+VLA_VENV := .venv-vla
+vla-setup: $(VLA_VENV)/.installed
+
+$(VLA_VENV)/.installed: requirements-vla.txt
+	@command -v uv >/dev/null || { echo "make vla-setup needs uv: brew install uv" >&2; exit 1; }
+	uv venv --allow-existing --python 3.12 $(VLA_VENV)
+	uv pip install --python $(VLA_VENV)/bin/python -r requirements-vla.txt
+	@# LeRobot brings OpenCV without windows; put in the same version with them, for sim --show.
+	@# The two share the cv2 directory, so the one with windows is reinstalled after the other goes.
+	@version=$$(uv pip show --python $(VLA_VENV)/bin/python opencv-python-headless 2>/dev/null | sed -n 's/^Version: //p'); \
+	if [ -n "$$version" ]; then \
+	    uv pip uninstall --python $(VLA_VENV)/bin/python opencv-python-headless && \
+	    uv pip install --reinstall --no-deps --python $(VLA_VENV)/bin/python "opencv-python==$$version"; fi
 	@touch $@
 
 build:

@@ -34,6 +34,7 @@ copy cả khối lệnh, dán vào terminal rồi so kết quả của mình v�
 | [5 · Tối ưu model bằng thí nghiệm](05-toi-uu-model.md) | 12 thí nghiệm thật với kết quả: dữ liệu, nhiễu, nhãn, tốc độ mục tiêu, learning rate, epoch, augmentation, seed | 60 phút |
 | [6 · Debug model](06-debug-model.md) | khoanh vùng lỗi, bảng triệu chứng → nguyên nhân → lệnh, các bug thật đã gặp trong dự án | 40 phút |
 | [7 · Debug và tối ưu như dân chuyên nghiệp](07-debug-chuyen-nghiep.md) | bản đồ các phương pháp; LR range test; gradient, update/weight, unit chết; ablation; sai số on-policy; DAgger; báo cáo HTML | 60 phút |
+| [8 · Chạy và debug VLA (SmolVLA) trên MacBook](08-vla-tren-mac.md) | môi trường LeRobot; fine-tune trên GPU Mac; `probe_vla`, `see_vla`, `vla_app`; so sánh MPS với CPU; lỗi riêng của Mac | 45 phút, cộng khoảng 2 giờ train |
 
 Nên học theo thứ tự. Bài 4 và 5 dùng model `v1` train ở bài 3.
 

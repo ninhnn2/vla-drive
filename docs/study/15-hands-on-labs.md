@@ -592,6 +592,16 @@ cd /home/fanning/data1/AI_SOURCE/vla-drive && export PYTHONPATH=.
 With `PYTHONPATH=.`, `$V -m drive …` runs this repository's CLI (the same commands as
 `./drive.sh`) inside the LeRobot environment.
 
+**On a Mac (Apple Silicon)**, or anywhere without that folder: `make vla-setup` makes the
+same kind of environment in `.venv-vla` (Python 3.12, LeRobot **0.5.1** from PyPI, the
+nearest release to the 0.5.2 checkout above, and gradio, with OpenCV's windowed build), and
+`./vla.sh` stands for `$V` with `PYTHONPATH=.` and `PYTORCH_ENABLE_MPS_FALLBACK=1` set. Two
+differences show up: 0.5.1 has no `--dataset.eval_split`, `--eval_steps` or
+`--max_eval_samples` (leave them out of Step 2), and the device is `--policy.device=mps`
+with `--batch_size=8` in 16 GB. On an M3 a step of batch 8 takes about 2 s. The whole route
+on a Mac, with its outputs, is [docs/thuc-hanh/08-vla-tren-mac.md](../thuc-hanh/08-vla-tren-mac.md)
+(in Vietnamese).
+
 ### Step 1: export the episodes (seconds)
 
 ```bash
