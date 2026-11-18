@@ -211,6 +211,11 @@ loss, with $\beta = 0.05$.
 **Action expert** · In VLAs with a continuous action head, the network that generates
 the action chunk from the backbone's features, usually by iterative denoising.
 
+**Attention sink** · A token that receives much attention without carrying information
+about the input, e.g. padding or a corner token that is the same in every frame.
+Transformers park attention there. It is why attention is not importance.
+[Ch. 17](17-debugging-the-model.md#where-does-it-look-toolssee_vlapy)
+
 **Backend** · In jetson-orin-nano-vla, an object that runs one model's inference:
 `infer(observation)` returns a result with a `.chunk`. `BackendPolicy` wraps one.
 [`drive/policy/vla.py`](../../drive/policy/vla.py) · [Ch. 13](13-vla-and-smolvla.md)
@@ -221,6 +226,10 @@ target task.
 **Flow matching** · A way of training a generative model to transform noise into data
 by integrating a learned velocity field over a few steps; SmolVLA's action head.
 
+**Image token** · One vector the vision encoder makes from a region of the image. In
+SmolVLA a 512×512 input becomes 8×8 = 64 tokens. With this camera, 16 of them are
+padding. [Ch. 17](17-debugging-the-model.md#how-the-image-becomes-tokens)
+
 **Jetson Orin Nano** · NVIDIA's small embedded computer with an integrated GPU and
 8 GB of memory shared between CPU and GPU; the intended on-car computer.
 [Ch. 14](14-jetson-deployment.md)
@@ -229,8 +238,12 @@ by integrating a learned velocity field over a few steps; SmolVLA's action head.
 (including SmolVLA), training and robot tooling.
 
 **LeRobotDataset** · LeRobot's dataset format: Parquet tables, video for cameras, and
-metadata. The format these episodes would be converted to; not implemented here.
-[Ch. 13](13-vla-and-smolvla.md)
+metadata. `./drive.sh export` writes the episodes in it.
+[`drive/learn/export.py`](../../drive/learn/export.py) · [Ch. 13](13-vla-and-smolvla.md)
+
+**Occlusion sensitivity** · Hiding one region of the input at a time and measuring how
+far the output moves. It shows what the answer depends on, unlike attention.
+[`tools/see_vla.py`](../../tools/see_vla.py) · [Ch. 17](17-debugging-the-model.md#two-ways-to-ask-where)
 
 **ONNX** · An open file format for neural networks, used as the hand-over between
 training frameworks and inference engines.

@@ -458,5 +458,5 @@ image. Predict FAIL or WARN before each.
 ## Further reading
 
 - NumPy: `savez_compressed` and the `.npz` format.
-- LeRobot dataset documentation, for the format these episodes would be converted to ([chapter 13](13-vla-and-smolvla.md)).
+- LeRobot dataset documentation, for the format `./drive.sh export` writes them in ([chapter 13](13-vla-and-smolvla.md), Lab 15).
 - Laskey et al. 2017 (DART), for why `collect` records what it records.

@@ -1,6 +1,6 @@
 # 10 · Model training
 
-**[TESTED]** by `LearnTests` in [`tests/test_drive_learn.py`](../../tests/test_drive_learn.py#L423)
+**[TESTED]** by `LearnTests` in [`tests/test_drive_learn.py`](../../tests/test_drive_learn.py#L481)
 (skipped when PyTorch is absent; run `make test` in the container).
 
 ## What problem are we solving?
