@@ -35,7 +35,7 @@ try:
 except ImportError:                      # only an environment set up for VLA fine-tuning has it
     lerobot = None
 
-needs_torch = unittest.skipIf(torch is None, "PyTorch is not installed (use the container: make test)")
+needs_torch = unittest.skipIf(torch is None, "PyTorch is not installed (make setup, or use the container: make test)")
 
 
 def quiet(*a, **k):
@@ -80,6 +80,7 @@ class CollectTests(unittest.TestCase):
             summary = collect(Path(d) / "data", episodes=2, duration_s=2.0, log=quiet)
             self.assertEqual(summary["frames"], 40)
             self.assertLess(summary["max_lateral_m"], 0.45)
+            self.assertEqual(summary["off_road_frames"], 0)                # 0.45 m is half the road's width
             episode = Path(d) / "data/sim-001"
             data, labels = np.load(episode / "episode.npz"), read_labels(episode)
             self.assertEqual(sorted(data), ["actions", "images", "states", "t"])
@@ -103,6 +104,12 @@ class CollectTests(unittest.TestCase):
                 collect(Path(d) / "a", episodes=1, duration_s=1.0, log=quiet)
             collect(Path(d) / "a", episodes=1, duration_s=1.0, name="more", log=quiet)
             self.assertEqual(sorted(p.name for p in (Path(d) / "a").iterdir()), ["more-000", "sim-000"])
+
+    def test_one_target_speed_for_every_drive(self):
+        with tempfile.TemporaryDirectory() as d:
+            collect(Path(d) / "fixed", episodes=2, duration_s=4.0, speeds=(1.2,), log=quiet)
+            top = [np.load(e / "episode.npz")["states"][:, 0].max() for e in sorted((Path(d) / "fixed").iterdir())]
+            np.testing.assert_allclose(top, [1.2, 1.2], atol=0.05)                 # both cruise at 1.2 m/s
 
     def test_watching_does_not_change_the_recording(self):
         with tempfile.TemporaryDirectory() as d:
@@ -317,6 +324,17 @@ class EvaluateTests(unittest.TestCase):
             self.assertTrue((Path(d) / "reports/pure-pursuit.json").is_file())
         self.assertRegex(out.getvalue(), r"pure-pursuit\s+2/2")
 
+    def test_a_report_is_named_after_the_whole_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            project = Project(Path(d))
+            for version in ("v1", "v1.2"):
+                project.model(version).parent.mkdir(parents=True, exist_ok=True)
+                project.model(version).write_bytes(b"")
+            # v1.2 must not overwrite v1's report: status looks it up as reports/v1.2.json
+            self.assertEqual(report_name("v1.2", project.checkpoint("v1.2")), "v1.2")
+            self.assertEqual(report_name("v1", project.checkpoint("v1")), "v1")
+            self.assertEqual(report_name(str(project.model("v1.2")), project.model("v1.2")), "v1.2")
+
 
 class ExportTests(unittest.TestCase):
     """Episodes as a LeRobotDataset. The per-frame mapping needs only numpy; writing needs lerobot."""
@@ -445,6 +463,95 @@ class VlaAppTests(unittest.TestCase):
         self.assertFalse(same_picture(np.zeros_like(self.image), self.image))
 
 
+@needs_torch
+class ProbeTests(unittest.TestCase):
+    def test_every_probe_runs_and_draws(self):
+        from drive.learn.probe import WHAT
+        from drive.learn.train import train
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(io.StringIO()) as out:
+            project = Project(Path(d))
+            small_dataset(project.episodes)
+            train(project.episodes, project.model("v1.0"), epochs=1, device="cpu", log=quiet)
+            for what in WHAT:
+                self.assertEqual(cli.main(["probe", "v1.0", what, "--project", d, "--worst", "2",
+                                           "--duration-s", "1"]), 0, what)
+            pictures = sorted(p.name.split("-")[0] for p in (project.home / "probe/v1.0").glob("*.png"))
+            self.assertEqual(pictures, ["activations", "saliency", "worst", "worst"])
+            page = (project.home / "probe/v1.0/report.html").read_text()
+            self.assertEqual(page.count("<section>"), 9)
+            self.assertIn("<svg", page)
+            with self.assertRaises(SystemExit):
+                cli.main(["probe", "v1.0", "saliency", "--project", d, "--frame", "sim-000"])
+        text = out.getvalue()
+        for expected in ("323,124 parameters", "63x63 px of the 96x128 input", "held out: 1 episodes (sim-002)",
+                         "never active on 20 frames", "mirror:", "+0.12 throttle per m/s", "update / weight",
+                         "the picture", "6 drives of 1 s", "by distance from the centerline", "report: "):
+            self.assertIn(expected, text)
+
+    def test_history_names_what_the_curves_show(self):
+        from drive.learn.probe import history
+
+        def report(train_losses, val_losses):
+            return {"frames": 100, "validation_frames": 10, "epochs": len(train_losses), "seconds": 1.0,
+                    "device": "cpu", "history": [{"epoch": i + 1, "train_loss": t, "val_loss": v, "val_steer_error": v}
+                                                 for i, (t, v) in enumerate(zip(train_losses, val_losses))]}
+        lines = []
+        overfit = history(report([0.1, 0.05, 0.03, 0.02, 0.01, 0.005], [0.1, 0.06, 0.05, 0.06, 0.07, 0.08]), lines.append)
+        self.assertTrue(overfit["verdicts"][0].startswith("OVERFITTING"))
+        self.assertEqual(overfit["best_epoch"], 3)
+        healthy = history(report([0.1, 0.05, 0.03, 0.02, 0.019, 0.018], [0.09, 0.05, 0.035, 0.03, 0.029, 0.029]),
+                          lines.append)
+        self.assertTrue(healthy["verdicts"][0].startswith("HEALTHY"))
+        stuck = history(report([0.1, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.1]), lines.append)
+        self.assertTrue(any(v.startswith("NOT LEARNING") for v in stuck["verdicts"]))
+        # Against the average plan's loss: falling curves can still mean it learned nothing.
+        falling = report([0.1, 0.08, 0.077, 0.076], [0.095, 0.088, 0.086, 0.085])
+        self.assertTrue(history(falling, lines.append, baseline=0.12)["verdicts"][0].startswith("NOT LEARNING"))
+        self.assertTrue(history(falling, lines.append, baseline=0.25)["verdicts"][0].startswith("UNDERFITTING"))
+        own = history({**falling, "average_plan_val_loss": 1.0}, lines.append, baseline=0.12)
+        self.assertEqual(own["average_plan_val_loss"], 1.0)                    # the report's own figure wins
+        self.assertFalse(any(v.startswith(("NOT LEARNING", "UNDERFITTING")) for v in own["verdicts"]))
+
+
+@needs_torch
+class LrFindTests(unittest.TestCase):
+    def test_the_sweep_rises_through_the_rates_and_names_a_range(self):
+        from drive.learn.lrfind import find_lr
+        with tempfile.TemporaryDirectory() as d:
+            found = find_lr(small_dataset(Path(d) / "data"), steps=30, device="cpu", log=quiet)
+        rates = [r for r, _, _ in found["swept"]]
+        self.assertTrue(all(0 <= d <= 1 for _, _, d in found["swept"]))
+        self.assertEqual(rates, sorted(rates))
+        self.assertAlmostEqual(rates[0], 1e-6)
+        low, high = found["range"]
+        self.assertLessEqual(low, high)
+        self.assertTrue(rates[0] <= found["steepest_at"] <= found["lowest_at"] <= rates[-1])
+
+
+@needs_torch
+class DaggerTests(unittest.TestCase):
+    def test_the_network_drives_and_the_teacher_labels(self):
+        from drive.learn.train import train
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            train(small_dataset(d / "data"), d / "cnn.pt", epochs=1, device="cpu", log=quiet)
+            done = collect(d / "dagger", episodes=1, duration_s=1.0, steer_noise=0.0, driver=d / "cnn.pt", log=quiet)
+            self.assertEqual((done["episodes"], done["frames"]), (1, 10))
+            self.assertEqual(read_labels(d / "dagger/sim-000")["source"], "teacher")
+            # With beta 1 the teacher has every tick: the drive is the teacher's, undisturbed.
+            collect(d / "taught", episodes=1, duration_s=1.0, steer_noise=0.0, driver=d / "cnn.pt", beta=1.0,
+                    log=quiet)
+            collect(d / "teacher", episodes=1, duration_s=1.0, steer_noise=0.0, log=quiet)
+            for key in ("states", "actions"):
+                np.testing.assert_array_equal(np.load(d / "taught/sim-000/episode.npz")[key],
+                                              np.load(d / "teacher/sim-000/episode.npz")[key])
+            with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                cli.main(["collect", "--project", str(d), "--checkpoint", "v1"])        # no --driver cnn
+            with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                cli.main(["collect", "--project", str(d), "--driver", "cnn", "--checkpoint", str(d / "cnn.pt"),
+                          "--beta", "2"])
+
+
 class StatusTests(unittest.TestCase):
     def test_follows_the_project_through_its_stages(self):
         with tempfile.TemporaryDirectory() as d:
@@ -502,6 +609,19 @@ class LearnTests(unittest.TestCase):
         np.testing.assert_allclose(x[flipped][:, 0, 0, 0], (images[flipped][:, 0, 2, 0] * gain[flipped]), rtol=1e-5)
         self.assertTrue(((gain >= 0.8) & (gain <= 1.2)).all())
 
+    @unittest.skipUnless(torch is not None and torch.backends.mps.is_available(), "no Mac GPU (MPS)")
+    def test_mps_reads_a_slice_of_the_batch(self):
+        # Validation runs the held-out frames 512 at a time. On MPS, permuting such a uint8
+        # slice and then casting it read the batch from frame 0: a wrong validation score.
+        from drive.learn.model import ChunkNet
+        model = ChunkNet(PLAN_STEPS).eval()
+        images = torch.randint(0, 255, (6, 96, 128, 3), dtype=torch.uint8)
+        states = torch.randn(6, 2)
+        with torch.no_grad():
+            expected = model(images[3:], states[3:])
+            out = model.to("mps")(images.to("mps")[3:], states.to("mps")[3:]).cpu()
+        torch.testing.assert_close(out, expected, rtol=1e-4, atol=1e-5)
+
     def test_train_then_drive(self):
         from drive.learn.train import train
         from drive.policy.cnn import CnnPolicy
@@ -512,6 +632,18 @@ class LearnTests(unittest.TestCase):
             self.assertEqual(json.loads((d / "cnn.json").read_text()), report)
             again = train(d / "data", d / "again.pt", epochs=2, device="cpu", log=quiet)
             self.assertEqual(report["history"], again["history"])
+            self.assertEqual((report["lr"], report["batch"], report["augmentation"], report["seed"]),
+                             (1e-3, 128, True, 0))
+            self.assertGreater(report["average_plan_val_loss"], report["history"][-1]["val_loss"])
+            inside = report["history"][0]
+            self.assertEqual(sorted(inside["grad_norm"]), sorted(inside["update_ratio"]))
+            self.assertEqual(len(inside["grad_norm"]), 8)                       # 5 convolutions, 3 linear layers
+            self.assertEqual(len(inside["dead"]), 7)                            # the ReLUs
+            self.assertGreater(min(inside["update_ratio"].values()), 0)
+            self.assertEqual(inside["lr"], 1e-3)
+            plain = train(d / "data", d / "plain.pt", epochs=2, device="cpu", augmentation=False, log=quiet)
+            self.assertFalse(plain["augmentation"])
+            self.assertNotEqual(plain["history"], report["history"])
 
             policy = CnnPolicy(d / "cnn.pt")
             world = World()

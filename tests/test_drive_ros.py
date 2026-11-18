@@ -29,7 +29,7 @@ if rclpy is not None:
     from drive_ros.teleop_node import MAX_THROTTLE, stick
 
 
-@unittest.skipIf(rclpy is None, "ROS 2 is not installed (use the container: make test)")
+@unittest.skipIf(rclpy is None, "ROS 2 is not installed (use the container: make test, or make ros-test on a Mac)")
 class MessageTests(unittest.TestCase):
     def test_image_round_trip(self):
         image = np.random.default_rng(0).integers(0, 255, (24, 32, 3), dtype=np.uint8)
@@ -53,7 +53,7 @@ class MessageTests(unittest.TestCase):
         np.testing.assert_allclose(stick(720, 180, 960, 720), [-0.5, 0.5 * MAX_THROTTLE])
 
 
-@unittest.skipIf(rclpy is None, "ROS 2 is not installed (use the container: make test)")
+@unittest.skipIf(rclpy is None, "ROS 2 is not installed (use the container: make test, or make ros-test on a Mac)")
 class NodeTests(unittest.TestCase):
     def run_nodes(self, project: Path, seconds: float, *parameters: str):
         """Spin the simulator, the driver and the recorder together; returns them."""

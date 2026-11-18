@@ -31,6 +31,7 @@ this says why it is built the way it is.
 | 16 | [Experiments and engineering analysis](16-experiments.md) | design and interpret your own experiments |
 | 17 | [Debugging the model and the algorithm](17-debugging-the-model.md) | localise a fault: data, training, the model offline (what it outputs, where in the image it looks), or the loop |
 | | [Glossary](GLOSSARY.md) · [References](REFERENCES.md) · [Study tracker](STUDY-TRACKER.md) | |
+| | [Thực hành (tiếng Việt)](../thuc-hanh/README.md): 7 bài | collect, read and judge data; name every layer; train and read the curves; analyse the model's output offline and in closed loop with `./drive.sh probe`; run 12 optimisation experiments; debug; the learning-rate range test, gradients and update ratios, input ablation, on-policy error and DAgger |
 | | [Architecture diagrams](diagrams/vla-drive-architecture.drawio) (draw.io, 5 pages) | see the pipeline, the runtime loop and the SmolVLA model at a glance; find your way in the source; plan how to improve the model |
 
 ## How every statement is labelled
@@ -60,9 +61,10 @@ it has not reached. So that the two are never confused, claims carry one of thes
   (`lane-camera`, `cnn`) can differ slightly between OpenCV versions.
 - **Units** are SI. An action is `[steer, throttle]`, both in $[-1, 1]$: steer $+1$ is
   full left, throttle $+1$ full power, $-1$ full brake. There is no reverse gear.
-- **Commands.** `make …` runs in the project's Docker container. `./drive.sh …` also
-  runs directly on a PC that has numpy and OpenCV; only `train` and the `cnn` policy
-  need the container's PyTorch.
+- **Commands.** `make …` runs in the project's Docker container; on a Mac it runs
+  `drive/` natively in `.venv` (`make setup`) and only ROS 2 in a container.
+  `./drive.sh …` also runs directly on a PC that has numpy and OpenCV; only `train` and
+  the `cnn` policy need PyTorch, which the container and `.venv` have.
 - **Diagrams** are Mermaid and **equations** are LaTeX; both render on GitHub and in
   VS Code's Markdown preview (with a Mermaid extension).
 
