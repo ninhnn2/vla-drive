@@ -44,6 +44,8 @@ the left when a model is new (is the data what you think?).
 | LeRobot read-back | what the trainer will actually feed the model | §1 |
 | the `lerobot-train` log | loss, gradient norm, learning rate, speed, memory, held-out loss | §2 |
 | **`tools/probe_vla.py`** | the model offline: accuracy per chunk step, noise, symmetry, sensitivity, timing, shapes | §3 |
+| **`tools/see_vla.py`** | where in the image the output comes from: the model's input, attention, occlusion | §3 |
+| **`tools/vla_app.py`** | a web app: one image in (a frame, an upload, your painting), the chunk out, drawn on the road | §3 |
 | `sim --show` debug panel | the chunk in use, the skipped part, the action played, model against motors | [Lab 1](15-hands-on-labs.md#lab-1-run-the-simulator) |
 | `sim --log actions.csv` | every 20 ms tick, for analysis afterwards | §4 |
 | `evaluate`, `sweep` | closed-loop results, latency sensitivity | chapters [11](11-model-evaluation.md), [5](05-action-chunking-and-latency.md) |
@@ -337,6 +339,226 @@ part: the 10 denoising steps are about half the time. `num_steps` 5 would save r
 80 ms here; whether accuracy survives is an experiment ([diagram page 5](diagrams/vla-drive-architecture.drawio)).
 The probe sets `backend.policy.config.num_steps`, which is what `sample_actions` reads.
 
+### Where does it look? `tools/see_vla.py`
+
+The probes say *what* the model outputs. [`tools/see_vla.py`](../../tools/see_vla.py)
+draws *where in the image* the output comes from (measured 2026-11-18):
+
+```bash
+$V tools/see_vla.py                         # 3 frames of sim2-031 (hardest left, hardest right, straightest)
+$V tools/see_vla.py --summary 10            # every 10th frame, averaged: about 2.5 min
+$V tools/see_vla.py --frames 235 --video    # one frame, and the attention on every frame as an mp4
+```
+
+Everything goes to `runs/drive/reports/see-smolvla-v1/`: a panel per frame, the same
+attention layer by layer (`…-layers.png`), the numbers (`.json`), and the summary.
+
+![see_vla panel for frame 235 of sim2-031](images/see-sim2-031-235.png)
+
+#### How the image becomes tokens
+
+LeRobot's `resize_with_pad` scales the 320×240 camera image to 512×384 and pads the
+**top** with 128 black rows. SigLIP cuts the 512×512 image into 32×32 patches, and
+SmolVLM2's connector merges each 4×4 group of patches into one token: an **8×8 grid of
+64 tokens, row by row** (`pixel_shuffle` in `transformers/models/smolvlm/modeling_smolvlm.py`).
+One token is a 64×64 cell of the model input, a 40×40 cell of the camera image
+(the "model input" view above). So:
+
+- **16 of the 64 image tokens are padding** (token rows 0–1), and the next 16 are sky
+  (rows 2–3). Half the image tokens show nothing about the road.
+- The order was checked, not assumed. A bright 40×40 square on a mid-grey image, in
+  each of the 48 camera cells in turn, changed the token in the same cell most in 41 of the 48 cases.
+  In the other 7 the most-changed token was within two cells, mostly at the left and
+  right edges. Tokens are mostly local, but not strictly. SigLIP's attention mixes the
+  whole image, so a token can carry something from elsewhere.
+
+#### Two ways to ask "where"
+
+| | attention | occlusion |
+|---|---|---|
+| question | where does the network *read* from? | what *changes the answer*? |
+| how | record the softmax of the action expert's queries in every denoising step; average over 15 heads, 16 layers, 10 steps, 16 chunk tokens, 4 noises | fill one camera cell with its mean colour, rerun with the same noises, measure how far the mean of the first 4 actions (0.4 s, the part the executor plays) moves |
+| cost | free: one forward pass | 48 cells × 4 noises = 192 forward passes, about 5 s a frame in batches of 16 |
+| limit | attention is not importance (below) | one cell at a time: a cue repeated elsewhere survives; a uniform cell (sky, plain asphalt) cannot change under its own mean colour |
+
+The attention is recorded with the wrap-a-function trick of §5: `Seer.look` swaps
+`vlm_with_expert.eager_attention_forward` for a copy that also keeps the probabilities.
+In a denoising step the queries are the 16 chunk tokens. The keys are the 113 prefix
+tokens: 64 image tokens, 48 sentence tokens and 1 state token. In the self-attention
+layers the 16 chunk tokens are also keys.
+
+#### What `smolvla-v1` looks at
+
+The summary over 30 frames of `sim2-031` (every 10th, 4 noises):
+
+![see_vla summary over sim2-031](images/see-sim2-031-summary.png)
+
+| token row | camera rows | ground ahead of the car | attention | steering sensitivity, mean-colour fill | grey fill |
+|---|---|---|---|---|---|
+| 0–1 | — | padding | 19 % | — | — |
+| 2–3 | 0–80 | sky | 18 % | 3 % | 30 % |
+| **4** | 80–120 | horizon to 0.76 m | 22 % | **61 %** | 27 % |
+| 5 | 120–160 | 0.76 to 0.36 m | 16 % | 26 % | 24 % |
+| 6–7 | 160–240 | 0.36 to 0.20 m | 25 % | 10 % | 19 % |
+
+The distances come from the simulator's camera (`Camera.forward_m` in `drive/sim/render.py`).
+Steering sensitivity is each row's share of the summed |Δsteer| over the 48 cells. The
+grey column is `--summary 10 --fill grey`, which hides each cell under plain grey (128).
+
+- **It steers by the road from about 0.4 m ahead to the horizon.** 87 % of the steering sensitivity is in
+  token rows 4–5. On a second held-out episode, `sim2-035`, the same holds: 63 % in row 4,
+  24 % in row 5, 10 % in rows 6–7 and 2 % in the sky. The teacher, pure pursuit, aims at a point `0.4 + 0.35·v` m ahead
+  (`drive/policy/pure_pursuit.py`): 0.87 m at the 1.35 m/s of these frames. That point is
+  camera row 116, inside token row 4. The model learnt to read where its teacher looks.
+  In frame 235 (the panel above, a right bend), hiding a single cell of row 4 moved
+  the steering by up to +0.30 (towards the left) on a command of −0.49. Hiding a cell of
+  the road just ahead moved it by 0.03 at most. With the grey fill, too, the three most
+  sensitive cells (0.065–0.083 on average) are in rows 4–5, on the road edges.
+- **Hiding a whole band says the same.** Filling every cell of a band with its own mean
+  colour (29 frames of `sim2-031`, 4 noises) moved the steering by, on average: row 4
+  **0.085**, row 5 0.080, rows 6–7 together **0.024** (at most 0.096). The road just in
+  front of the car is a third of the camera image, and the model hardly needs it.
+- **It ignores the sky only because the sky never changes.** Under its own mean colour a
+  sky cell does not change, so 3 % says little. A grey square in the sky moves the
+  steering by 0.02–0.04 per cell: something the model has never seen there, and it
+  reacts. The mean-colour fill asks "does the detail here matter?". The grey fill asks
+  "would anything here matter?". A real obstacle or a sign above the horizon would be
+  new to this model.
+- **The throttle does not come from any single cell.** No cell moved it by more than
+  0.002 on average (0.010 in frame 235). The [blank probe](#blank-what-does-it-do-when-it-sees-nothing)
+  shows that the image as a whole does matter: a black image gives throttle 0.92.
+- **Half of the attention goes to the image:** 51 % on average. The sentence gets 22 %,
+  the state 10 %, and the chunk tokens 17 %. The 22 % on a sentence that never changes
+  ([task probe](#task-does-the-sentence-matter)) is spent on a constant.
+- **Attention agrees with occlusion on the best row, and disagrees elsewhere.** Row 4
+  gets the most attention (22 %) and the most sensitivity. But the padding rows get 19 %
+  of the image attention. Their pixels are the same black in every frame, so they hold
+  nothing about this frame. A token at the bottom-right corner also gets 3.8 %, more than most road
+  tokens, and it is bright in most self-attention layers (`…-layers.png`). Transformers often
+  park attention on such uninformative tokens: "attention sinks". **Use attention
+  to see how the network routes information, and occlusion to see what it depends on.**
+- **The layers differ** (frame 235, the image below). The cross-attention
+  layers (odd) put 49–74 % of their attention on the image, concentrated on a few
+  tokens, mostly in rows 4–5. The self-attention layers (even) spread over the image
+  and give 10–74 % to the chunk tokens, that is, to the plan being denoised.
+
+![the action expert's attention on the image, per layer, frame 235](images/see-sim2-031-235-layers.png)
+
+#### What to try (hypotheses, not tested)
+
+- **Crop before export.** A quarter of the image tokens are padding and a quarter are
+  sky. Cropping the camera image to the road band, or making it square, would put
+  those 32 tokens on the road: more resolution where the model reads. That means a
+  new export, a new fine-tune and a closed-loop evaluation ([chapter 16](16-experiments.md)
+  format). Re-run this tool on the new model to see whether it reads the same band.
+- **Compare models.** The same tool works for any LeRobot checkpoint (`--checkpoint`).
+  Comparing the row profile of a model that drives better or worse tells you whether
+  the difference is *where* it looks.
+- **Look at failures, not averages**: next.
+
+#### At the worst moment of a drive
+
+`--episode` also takes a directory with an `episode.npz`, such as the one `sim --record`
+writes during a closed-loop drive. `--frames` also takes times. Record a drive with its
+action log, find the worst moment in the log, and look at the frames before it:
+
+```bash
+R=runs/drive/reports/see-smolvla-v1
+$V -m drive sim --policy vla --checkpoint smolvla-v1 --duration-s 60 --latency-ms 125 \
+    --record $R/drive --log $R/drive.csv
+$V tools/see_vla.py --episode $R/drive --frames 34.8s,35.3s,35.8s --out $R/drive-see
+```
+
+The drive went 4.02 laps at 1.48 m/s, 5.5 cm rms, worst 14.2 cm at 35.76 s, with the
+plan 200 ms old there. That is inside the normal range at 125 ms latency, so
+latency was not the trigger this time. A recorded drive has no labels, so the panel
+shows no teacher:
+
+![see_vla on the closed-loop drive, 1 s before its worst moment](images/see-vla-drive-348.png)
+
+The car is left of the line: the centre line is right of the image's middle in the near
+rows. It is going 1.63 m/s, faster than most training frames (mean 1.31 m/s, standard
+deviation 0.26 m/s). The road bends right far ahead. The model steers −0.29, then −0.18
+and −0.15, towards the line. The far bend still drives the answer: hiding one cell of
+row 4 moves the steering by +0.18. Hiding a cell of the near rows, where the offset is
+plainest, moves it by 0.05 at most. Over 11 frames from 33 to 36 s, hiding rows 6–7 together moved the steering by
+0.022 on average, and hiding row 4 by 0.099.
+
+What this rules out: the model is **not** looking at the wrong place. It reads the band
+that holds its teacher's aim point. Pure pursuit steers from that one point (and its
+exact pose) and tracks at 1.5 cm, so what a good steering command needs is in the band
+the model reads. The weave is more likely in *how precisely* it answers than in *where*
+it looks. That matches two earlier results:
+- the spread of the chunk across starting noises (the
+  [noise probe](#noise-how-much-does-the-starting-noise-move-the-chunk));
+- the drop from 4.4 to 3.0 cm rms with zero noise. That drive was also slower, so the
+  two causes are not yet separated.
+
+A tool that rules a cause out is as useful as one that finds it.
+
+### Try it by hand: `tools/vla_app.py`
+
+The probes and `see_vla.py` answer fixed questions. [`tools/vla_app.py`](../../tools/vla_app.py)
+is a small web app for your own: give the model one image, change one thing, and see
+what it does. It needs gradio in the LeRobot environment, installed once. The install
+measured here added 15 packages (gradio 6.32) and changed none of the existing ones:
+
+```bash
+UV_CACHE_DIR=$D/uv-cache uv pip install --python $V gradio
+$V tools/vla_app.py                 # loads the model (about 10 s), then open http://127.0.0.1:7860
+```
+
+It listens on this computer only. The image editor draws with WebGL, which every
+normal browser has. Headless Chrome without a GPU does not, and shows an empty editor.
+
+![tools/vla_app.py on frame 235 of sim2-031, with a yellow stroke painted across the road](images/vla-app.png)
+
+- **Input.** Pick an episode and a frame. The model runs on it at once, so the frame
+  slider scrubs through a drive. Or upload, paste or photograph any image. Then:
+  - paint on the image with the brush, in road colours;
+  - set the speed and the wheel position the model is told;
+  - change the task sentence, the noise seed, the number of samples (starting noises)
+    and the number of denoising steps;
+  - mirror the image, change its brightness, or hide a band of it with the cells'
+    mean colour, grey or black;
+  - turn on the occlusion map (about 5 s).
+- **Output.**
+  - Where the chunk would take the car, drawn on the road. The chunk is driven
+    through the vehicle model with `plan_path` and projected with the simulator's
+    camera, like `browse` draws a labelled plan. Orange is the mean of the samples,
+    the thin lines are each sample, and cyan is the teacher's plan when the frame
+    comes from a labelled episode.
+  - The numbers: steering and throttle, their spread across samples, and the time.
+    The state is shown as the normaliser sees it, with a warning when it is outside
+    the training data.
+  - The chunk, the model input with its token grid, the attention, the occlusion
+    map, and a step-by-step table against the teacher.
+
+The app reuses `Seer` from `see_vla.py`, so its numbers are the same: frame 235 gives
+−0.488, as in the panel above. What `smolvla-v1` did with frame 54 of `sim2-031` (seed 0,
+4 samples, 10 steps). The steering is the mean of the first 4 actions; the model gives
+−0.131 and the teacher −0.082:
+
+| change | question | steering | throttle | note |
+|---|---|---|---|---|
+| none | | −0.131 | +0.170 | 241 ms for the batch of 4 |
+| mirror left-right | is it symmetric? | +0.121 | | a symmetric policy gives +0.131 |
+| hide the horizon band (mean colour) | does it steer by the far road? | −0.199 | | |
+| hide the near road (mean colour) | | −0.131 | | 0 pixels changed: plain asphalt here. The app says so |
+| hide the near road (grey) | | −0.145 | | |
+| hide the sky (grey) | does it ignore the sky? | −0.148 | | |
+| brightness ×0.3 | does it need daylight? | −0.187 | | |
+| speed 0 m/s | | −0.104 | **+0.996** | the app warns: normalised −5.05 |
+| speed 2.5 m/s | does it brake when too fast? | −0.113 | +0.166 | no; warning: above the training range |
+| task "stop" | does it obey? | −0.126 | +0.176 | no |
+| 1 sample, 1 denoising step | how much do the steps cost? | −0.140 | | 48 ms, against 219 ms for 1 sample and 10 steps |
+
+On frame 235, painting a yellow stroke across the road (the screenshot) moved the
+steering from −0.488 to −0.437. In the occlusion map, cells along the stroke now
+matter too. Two sky cells it crosses give +0.03 and +0.04, where nothing mattered
+before. Two road cells below the horizon give up to +0.10, where one cell reached
++0.06 before.
+
 ---
 
 ## 4 · Debug the closed loop
@@ -472,6 +694,7 @@ call, restore. It changes nothing on disk and needs no debugger.
 3. The noise probe gives a steering spread of 0.3 at step 15. Name two possible causes, one in the model and one in the data.
 4. Why is a standing car out of distribution for `smolvla-v1`, and what would you change?
 5. What does a large gap between `losses_after_forward` and `losses_after_in_ep_bound` tell you?
+6. A padding token gets 3 % of the image attention, more than most road tokens. Does the model depend on it? Which tool answers that, and why can the other not?
 
 <details><summary>Answers</summary>
 
@@ -480,6 +703,7 @@ call, restore. It changes nothing on disk and needs no debugger.
 3. Model: undertrained or uncertain, so the flow is wide. Data: the target's far end varies with disturbances the image cannot show (§1).
 4. Speed is normalised with mean 1.31 and std 0.26 m/s, so 0 m/s is −5 deviations. Record slow driving, or use fixed-range normalisation.
 5. Many target chunks run past the end of an episode and are masked: episodes are short relative to `chunk_size`.
+6. Attention says where the network reads, not what its answer depends on. A token that is the same in every frame can soak up attention (an attention sink) without carrying anything about the frame. Occlusion answers it: change the input and measure the output. Padding cannot be occluded in the camera image, but its pixels never change, so its share says nothing about the road.
 </details>
 
 ## Further reading

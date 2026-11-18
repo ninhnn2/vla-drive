@@ -387,6 +387,64 @@ class ExportTests(unittest.TestCase):
                 run(EpisodeConfig(policy="vla", duration_s=0.1))
 
 
+class SeeVlaTests(unittest.TestCase):
+    """tools/see_vla.py: the camera pixels each SmolVLA image token covers. Needs no model."""
+
+    def test_a_4_3_camera_fills_the_lower_six_rows_of_tokens(self):
+        from tools.see_vla import cells
+        boxes = cells(240, 320, (512, 512), 8)
+        self.assertEqual(len(boxes), 48)                       # 16 of the 64 tokens are padding
+        self.assertEqual({row for row, *_ in boxes}, set(range(2, 8)))
+        self.assertEqual(boxes[0], (2, 0, 0, 40, 0, 40))
+        self.assertEqual(boxes[-1], (7, 7, 200, 240, 280, 320))
+        covered = np.zeros((240, 320), int)
+        for _, _, y0, y1, x0, x1 in boxes:
+            covered[y0:y1, x0:x1] += 1
+        self.assertTrue((covered == 1).all())                   # every pixel in exactly one cell
+
+    def test_padding_goes_left_for_a_tall_image_and_vanishes_for_a_square_one(self):
+        from tools.see_vla import cells
+        self.assertEqual({col for _, col, *_ in cells(320, 240, (512, 512), 8)}, set(range(2, 8)))
+        self.assertEqual(len(cells(256, 256, (512, 512), 8)), 64)
+
+
+class VlaAppTests(unittest.TestCase):
+    """tools/vla_app.py: the edits it makes to an image before the model sees it. Needs no model or gradio."""
+
+    def setUp(self):
+        self.image = np.zeros((240, 320, 3), np.uint8)
+        self.image[:, :160] = (200, 30, 30)                    # left half red, right half black
+        self.image[200:210, 100:110] = 255                      # a white mark on the near road
+
+    def test_hiding_fills_exactly_the_band_and_reports_it(self):
+        from tools.vla_app import prepare
+        out, changed = prepare(self.image, True, False, 1.0, "the near road (rows 160-240)", "grey", (512, 512))
+        self.assertTrue((out[160:] == 128).all())
+        self.assertTrue((out[:160] == self.image[:160]).all())
+        self.assertEqual(changed, 80 * 320)
+        out, changed = prepare(self.image, True, False, 1.0, "the sky (rows 0-80)", "mean colour", (512, 512))
+        self.assertEqual(changed, 0)                            # uniform cells do not change under their mean
+
+    def test_mirror_brightness_and_fit(self):
+        from tools.vla_app import prepare
+        out, _ = prepare(self.image, True, True, 0.5, "nothing", "grey", (512, 512))
+        self.assertEqual(tuple(out[0, 0]), (0, 0, 0))           # the red half moved right and was halved
+        self.assertEqual(tuple(out[0, -1]), (100, 15, 15))
+        big = np.zeros((600, 800, 3), np.uint8)
+        self.assertEqual(prepare(big, True, False, 1.0, "nothing", "grey", (512, 512))[0].shape, (240, 320, 3))
+        self.assertEqual(prepare(big, False, False, 1.0, "nothing", "grey", (512, 512))[0].shape, (600, 800, 3))
+
+    def test_a_painted_picture_is_told_apart_from_browser_rounding(self):
+        from tools.vla_app import changed_pixels, same_picture
+        rounded = np.clip(self.image.astype(int) + 3, 0, 255).astype(np.uint8)
+        self.assertEqual(changed_pixels(rounded, self.image), 0)
+        painted = self.image.copy()
+        painted[100:105, 100:140] = (230, 194, 30)
+        self.assertEqual(changed_pixels(painted, self.image), 200)
+        self.assertTrue(same_picture(painted, self.image))      # still the same frame: its teacher plan applies
+        self.assertFalse(same_picture(np.zeros_like(self.image), self.image))
+
+
 class StatusTests(unittest.TestCase):
     def test_follows_the_project_through_its_stages(self):
         with tempfile.TemporaryDirectory() as d:
