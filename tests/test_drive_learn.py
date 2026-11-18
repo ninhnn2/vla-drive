@@ -415,14 +415,19 @@ class ProbeTests(unittest.TestCase):
             small_dataset(project.episodes)
             train(project.episodes, project.model("v1.0"), epochs=1, device="cpu", log=quiet)
             for what in WHAT:
-                self.assertEqual(cli.main(["probe", "v1.0", what, "--project", d, "--worst", "2"]), 0, what)
+                self.assertEqual(cli.main(["probe", "v1.0", what, "--project", d, "--worst", "2",
+                                           "--duration-s", "1"]), 0, what)
             pictures = sorted(p.name.split("-")[0] for p in (project.home / "probe/v1.0").glob("*.png"))
             self.assertEqual(pictures, ["activations", "saliency", "worst", "worst"])
+            page = (project.home / "probe/v1.0/report.html").read_text()
+            self.assertEqual(page.count("<section>"), 9)
+            self.assertIn("<svg", page)
             with self.assertRaises(SystemExit):
                 cli.main(["probe", "v1.0", "saliency", "--project", d, "--frame", "sim-000"])
         text = out.getvalue()
         for expected in ("323,124 parameters", "63x63 px of the 96x128 input", "held out: 1 episodes (sim-002)",
-                         "never active on 20 frames", "mirror:", "+0.12 throttle per m/s"):
+                         "never active on 20 frames", "mirror:", "+0.12 throttle per m/s", "update / weight",
+                         "the picture", "6 drives of 1 s", "by distance from the centerline", "report: "):
             self.assertIn(expected, text)
 
     def test_history_names_what_the_curves_show(self):
@@ -448,6 +453,45 @@ class ProbeTests(unittest.TestCase):
         own = history({**falling, "average_plan_val_loss": 1.0}, lines.append, baseline=0.12)
         self.assertEqual(own["average_plan_val_loss"], 1.0)                    # the report's own figure wins
         self.assertFalse(any(v.startswith(("NOT LEARNING", "UNDERFITTING")) for v in own["verdicts"]))
+
+
+@needs_torch
+class LrFindTests(unittest.TestCase):
+    def test_the_sweep_rises_through_the_rates_and_names_a_range(self):
+        from drive.learn.lrfind import find_lr
+        with tempfile.TemporaryDirectory() as d:
+            found = find_lr(small_dataset(Path(d) / "data"), steps=30, device="cpu", log=quiet)
+        rates = [r for r, _, _ in found["swept"]]
+        self.assertTrue(all(0 <= d <= 1 for _, _, d in found["swept"]))
+        self.assertEqual(rates, sorted(rates))
+        self.assertAlmostEqual(rates[0], 1e-6)
+        low, high = found["range"]
+        self.assertLessEqual(low, high)
+        self.assertTrue(rates[0] <= found["steepest_at"] <= found["lowest_at"] <= rates[-1])
+
+
+@needs_torch
+class DaggerTests(unittest.TestCase):
+    def test_the_network_drives_and_the_teacher_labels(self):
+        from drive.learn.train import train
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            train(small_dataset(d / "data"), d / "cnn.pt", epochs=1, device="cpu", log=quiet)
+            done = collect(d / "dagger", episodes=1, duration_s=1.0, steer_noise=0.0, driver=d / "cnn.pt", log=quiet)
+            self.assertEqual((done["episodes"], done["frames"]), (1, 10))
+            self.assertEqual(read_labels(d / "dagger/sim-000")["source"], "teacher")
+            # With beta 1 the teacher has every tick: the drive is the teacher's, undisturbed.
+            collect(d / "taught", episodes=1, duration_s=1.0, steer_noise=0.0, driver=d / "cnn.pt", beta=1.0,
+                    log=quiet)
+            collect(d / "teacher", episodes=1, duration_s=1.0, steer_noise=0.0, log=quiet)
+            for key in ("states", "actions"):
+                np.testing.assert_array_equal(np.load(d / "taught/sim-000/episode.npz")[key],
+                                              np.load(d / "teacher/sim-000/episode.npz")[key])
+            with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                cli.main(["collect", "--project", str(d), "--checkpoint", "v1"])        # no --driver cnn
+            with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                cli.main(["collect", "--project", str(d), "--driver", "cnn", "--checkpoint", str(d / "cnn.pt"),
+                          "--beta", "2"])
 
 
 class StatusTests(unittest.TestCase):
@@ -533,6 +577,12 @@ class LearnTests(unittest.TestCase):
             self.assertEqual((report["lr"], report["batch"], report["augmentation"], report["seed"]),
                              (1e-3, 128, True, 0))
             self.assertGreater(report["average_plan_val_loss"], report["history"][-1]["val_loss"])
+            inside = report["history"][0]
+            self.assertEqual(sorted(inside["grad_norm"]), sorted(inside["update_ratio"]))
+            self.assertEqual(len(inside["grad_norm"]), 8)                       # 5 convolutions, 3 linear layers
+            self.assertEqual(len(inside["dead"]), 7)                            # the ReLUs
+            self.assertGreater(min(inside["update_ratio"].values()), 0)
+            self.assertEqual(inside["lr"], 1e-3)
             plain = train(d / "data", d / "plain.pt", epochs=2, device="cpu", augmentation=False, log=quiet)
             self.assertFalse(plain["augmentation"])
             self.assertNotEqual(plain["history"], report["history"])

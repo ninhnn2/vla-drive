@@ -44,7 +44,8 @@ the left when a model is new (is the data what you think?).
 | LeRobot read-back | what the trainer will actually feed the model | §1 |
 | the `lerobot-train` log | loss, gradient norm, learning rate, speed, memory, held-out loss | §2 |
 | **`tools/probe_vla.py`** | the model offline: accuracy per chunk step, noise, symmetry, sensitivity, timing, shapes | §3 |
-| **`./drive.sh probe`** | the same for the CNN: layers, training curves against the average plan, errors per step, road and speed against two baselines, dead units, saliency, mirror, brightness, blank, speed and steering-state tests | [docs/thuc-hanh, lessons 3–4](../thuc-hanh/04-phan-tich-output.md) |
+| **`./drive.sh probe`** | the same for the CNN: layers, training curves against the average plan, gradient norms and update/weight ratios per epoch, errors per step, road and speed against two baselines, input ablation, dead units, saliency, mirror, brightness, blank, speed and steering-state tests, the error on its own drives against the distance off-centre, and an HTML report of all of it | [docs/thuc-hanh, lessons 3, 4 and 7](../thuc-hanh/07-debug-chuyen-nghiep.md) |
+| `./drive.sh lrfind`, `collect --driver cnn` | the learning-rate range test; DAgger, the network driving while the teacher labels | [docs/thuc-hanh, lesson 7](../thuc-hanh/07-debug-chuyen-nghiep.md) |
 | `sim --show` debug panel | the chunk in use, the skipped part, the action played, model against motors | [Lab 1](15-hands-on-labs.md#lab-1-run-the-simulator) |
 | `sim --log actions.csv` | every 20 ms tick, for analysis afterwards | §4 |
 | `evaluate`, `sweep` | closed-loop results, latency sensitivity | chapters [11](11-model-evaluation.md), [5](05-action-chunking-and-latency.md) |

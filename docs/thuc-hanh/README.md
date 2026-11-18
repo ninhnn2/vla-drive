@@ -33,6 +33,7 @@ copy cả khối lệnh, dán vào terminal rồi so kết quả của mình v�
 | [4 · Phân tích output của model](04-phan-tich-output.md) | sai số theo bước, so với baseline, frame tệ nhất, activation, saliency, kiểm tra hành vi, lái thật, log CSV | 60 phút |
 | [5 · Tối ưu model bằng thí nghiệm](05-toi-uu-model.md) | 12 thí nghiệm thật với kết quả: dữ liệu, nhiễu, nhãn, tốc độ mục tiêu, learning rate, epoch, augmentation, seed | 60 phút |
 | [6 · Debug model](06-debug-model.md) | khoanh vùng lỗi, bảng triệu chứng → nguyên nhân → lệnh, các bug thật đã gặp trong dự án | 40 phút |
+| [7 · Debug và tối ưu như dân chuyên nghiệp](07-debug-chuyen-nghiep.md) | bản đồ các phương pháp; LR range test; gradient, update/weight, unit chết; ablation; sai số on-policy; DAgger; báo cáo HTML | 60 phút |
 
 Nên học theo thứ tự. Bài 4 và 5 dùng model `v1` train ở bài 3.
 
@@ -67,7 +68,7 @@ Output trên máy dùng để viết tài liệu này:
 
 ```
 usage: drive.sh [-h]
-                {sim,sweep,collect,label,validate,browse,train,evaluate,probe,status,export}
+                {sim,sweep,collect,label,validate,browse,lrfind,train,evaluate,probe,status,export}
                 ...
 torch 2.5.1 | cuda False | mps True
 ```
@@ -109,11 +110,12 @@ nó dùng Python của container.
 
 | Lệnh | Dùng để |
 |---|---|
-| `./drive.sh collect` | thu dữ liệu: teacher lái 40 lượt, có nhiễu |
+| `./drive.sh collect` | thu dữ liệu: teacher lái 40 lượt, có nhiễu; hoặc model lái và teacher gán nhãn (DAgger, bài 7) |
 | `./drive.sh validate` | kiểm tra dữ liệu trước khi train |
 | `./drive.sh browse` | xem từng frame, có vẽ nhãn lên đường |
 | `./drive.sh train` | train CNN |
-| `./drive.sh probe` | **soi model**: layers, history, errors, activations, saliency, behaviour |
+| `./drive.sh probe` | **soi model**: layers, history, training, errors, ablation, activations, saliency, behaviour, onpolicy, report |
+| `./drive.sh lrfind` | thử nhanh các learning rate trước khi train lâu (bài 7) |
 | `./drive.sh evaluate` | cho model lái thật trên mọi track, cả hai chiều: bài kiểm tra cuối cùng |
 | `./drive.sh sim --log` | ghi từng tick (50 lần/giây) của một lượt lái ra file CSV để phân tích |
 | `./drive.sh status` | dự án đang có gì, nên làm gì tiếp |
