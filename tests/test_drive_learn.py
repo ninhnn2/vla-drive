@@ -321,6 +321,11 @@ class EvaluateTests(unittest.TestCase):
             self.assertEqual(code, 0)
             report = json.loads((Path(d) / "reports/lane-camera.json").read_text())
             self.assertEqual((report["policy"], report["summary"]["drives_passed"]), ("lane-camera", 2))
+            self.assertEqual(report["max_plan_age_ms"], 600.0)
+            cli.main(["evaluate", "pure-pursuit", "--project", d, "--tracks", "oval", "--duration-s", "2",
+                      "--latency-ms", "400", "--max-plan-age-ms", "1000"])
+            slow = json.loads((Path(d) / "reports/pure-pursuit.json").read_text())
+            self.assertEqual((slow["latency_ms"], slow["max_plan_age_ms"]), (400.0, 1000.0))
             self.assertTrue((Path(d) / "reports/pure-pursuit.json").is_file())
         self.assertRegex(out.getvalue(), r"pure-pursuit\s+2/2")
 
@@ -334,6 +339,37 @@ class EvaluateTests(unittest.TestCase):
             self.assertEqual(report_name("v1.2", project.checkpoint("v1.2")), "v1.2")
             self.assertEqual(report_name("v1", project.checkpoint("v1")), "v1")
             self.assertEqual(report_name(str(project.model("v1.2")), project.model("v1.2")), "v1.2")
+
+
+class VlaDeviceTests(unittest.TestCase):
+    """drive/policy/lerobot_backend.py picks where the VLA runs; it needs neither LeRobot nor a GPU to test."""
+
+    @staticmethod
+    def fake_torch(cuda: bool, mps: bool):
+        from types import SimpleNamespace
+        calls = []
+        return SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: cuda, synchronize=lambda: calls.append("cuda")),
+            backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps)),
+            mps=SimpleNamespace(synchronize=lambda: calls.append("mps")), calls=calls)
+
+    def test_cuda_then_the_macs_gpu_then_the_cpu_unless_told(self):
+        from unittest import mock
+        from drive.policy.lerobot_backend import pick_device
+        with mock.patch.dict("os.environ", {}, clear=False) as environ:
+            environ.pop("VLA_DEVICE", None)
+            self.assertEqual(pick_device(self.fake_torch(cuda=True, mps=True)), "cuda")
+            self.assertEqual(pick_device(self.fake_torch(cuda=False, mps=True)), "mps")
+            self.assertEqual(pick_device(self.fake_torch(cuda=False, mps=False)), "cpu")
+            environ["VLA_DEVICE"] = "cpu"
+            self.assertEqual(pick_device(self.fake_torch(cuda=True, mps=True)), "cpu")
+
+    def test_timings_wait_for_the_gpu_in_use(self):
+        from drive.policy.lerobot_backend import synchronize
+        torch = self.fake_torch(cuda=True, mps=True)
+        for device in ("cuda:0", "mps", "cpu"):
+            synchronize(torch, device)
+        self.assertEqual(torch.calls, ["cuda", "mps"])
 
 
 class ExportTests(unittest.TestCase):

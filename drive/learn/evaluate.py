@@ -36,6 +36,7 @@ def evaluate(config: EpisodeConfig, tracks=tuple(SHAPES), log=print) -> dict:
     passed = sum(d["passed"] for d in drives)
     log(f"{passed}/{len(drives)} drives passed")
     return {"policy": config.policy, "checkpoint": config.checkpoint, "latency_ms": config.latency_ms,
+            "max_plan_age_ms": config.max_plan_age_ms,
             "duration_s": config.duration_s, "passed": passed == len(drives),
             "summary": {"drives": len(drives), "drives_passed": passed,
                         "mean_speed_mps": round(sum(d["mean_speed_mps"] for d in drives) / len(drives), 2),
@@ -63,6 +64,9 @@ def add_parser(sub):
     p.add_argument("--tracks", type=lambda s: s.split(","), default=list(SHAPES))
     p.add_argument("--duration-s", type=float, default=40.0)
     p.add_argument("--latency-ms", type=float, default=100.0)
+    p.add_argument("--max-plan-age-ms", type=float, default=600.0,
+                   help="the supervisor brakes when the plan in use is older than this; it must exceed twice "
+                        "the latency (default 600)")
 
 
 def run(project: Project, args) -> int:
@@ -75,7 +79,8 @@ def run(project: Project, args) -> int:
             policy = {"policy": project.policy_for(checkpoint), "checkpoint": str(checkpoint)}
             name = report_name(ref, checkpoint)
         print(f"{ref}, {args.latency_ms:.0f} ms per inference, {args.duration_s:.0f} s per drive")
-        reports[name] = evaluate(EpisodeConfig(duration_s=args.duration_s, latency_ms=args.latency_ms, **policy),
+        reports[name] = evaluate(EpisodeConfig(duration_s=args.duration_s, latency_ms=args.latency_ms,
+                                               max_plan_age_ms=args.max_plan_age_ms, **policy),
                                  tuple(args.tracks))
         path = project.report(name)
         path.parent.mkdir(parents=True, exist_ok=True)

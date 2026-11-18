@@ -13,6 +13,7 @@ normalisation statistics. LeRobot is imported only here.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +32,23 @@ def chunk_dt_s(checkpoint: Path, default: float = 0.1) -> float:
     return default
 
 
+def pick_device(torch) -> str:
+    """$VLA_DEVICE if set, else cuda, else mps (a Mac's GPU), else cpu."""
+    if os.environ.get("VLA_DEVICE"):
+        return os.environ["VLA_DEVICE"]
+    if torch.cuda.is_available():
+        return "cuda"
+    return "mps" if torch.backends.mps.is_available() else "cpu"
+
+
+def synchronize(torch, device: str) -> None:
+    """Wait for the GPU to finish, so that a timing covers the work and not just its launch."""
+    if device.startswith("cuda"):
+        torch.cuda.synchronize()
+    elif device == "mps":
+        torch.mps.synchronize()
+
+
 class LeRobotBackend:
     """`infer(observation)` -> an object whose `.chunk` is `(chunk_size, action_dim)`, in robot units."""
 
@@ -47,7 +65,7 @@ class LeRobotBackend:
             raise ValueError(f"{checkpoint} is not a LeRobot checkpoint (no config.json); "
                              "point at .../checkpoints/last/pretrained_model")
         self.torch = torch
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or pick_device(torch)
         config = PreTrainedConfig.from_pretrained(checkpoint)
         config.device = self.device
         self.policy = get_policy_class(config.type).from_pretrained(checkpoint, config=config)

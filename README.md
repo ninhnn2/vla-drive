@@ -76,24 +76,33 @@ and the learned policy need PyTorch, which the container and `make setup`'s `.ve
 ## The VLA
 
 A SmolVLA (about 450 M parameters) fine-tuned on the same episodes. It runs in a
-LeRobot environment outside the container, with that environment's Python and
-`PYTHONPATH=.`. The setup and every flag are in Lab 15 of
+LeRobot environment of its own, outside the container: `make vla-setup` makes it
+(`.venv-vla`, Python 3.12, LeRobot 0.5.1 and gradio), and `./vla.sh` runs its Python with
+this repository on the path. The same works on Linux and on a Mac, where the model runs on
+the Apple GPU (MPS). The setup and every flag are in Lab 15 of
 [docs/study/15-hands-on-labs.md](docs/study/15-hands-on-labs.md).
 
 ```bash
-python -m drive export                  # the episodes as a LeRobotDataset, in runs/drive/lerobot
-lerobot-train --policy.path=lerobot/smolvla_base ...   # 2000 steps of batch 16 on an 8 GB laptop GPU
-python -m drive sim --policy vla --checkpoint smolvla-v1 --show
-python -m drive evaluate smolvla-v1 --latency-ms 125
+make vla-setup                          # once: about 1.6 GB
+./vla.sh -m drive export                # the episodes as a LeRobotDataset, in runs/drive/lerobot
+./vla.sh lerobot-train --policy.path=lerobot/smolvla_base ...   # 2000 steps of batch 16 on an 8 GB laptop GPU
+./vla.sh -m drive sim --policy vla --checkpoint smolvla-v1 --show
+./vla.sh -m drive evaluate smolvla-v1 --latency-ms 125
 ```
 
 To study and debug it ([chapter 17](docs/study/17-debugging-the-model.md) of the [study guide](docs/study/README.md)):
 
 ```bash
-python tools/probe_vla.py               # nine offline probes: accuracy per chunk step, noise, symmetry, timing
-python tools/see_vla.py                 # where in the image it looks: its input, attention, occlusion
-python tools/vla_app.py                 # a web app at http://127.0.0.1:7860: an image in, the chunk out (needs gradio)
+./vla.sh tools/probe_vla.py             # nine offline probes: accuracy per chunk step, noise, symmetry, timing
+./vla.sh tools/see_vla.py               # where in the image it looks: its input, attention, occlusion
+./vla.sh tools/vla_app.py --open        # a web app at http://127.0.0.1:7860: an image in, the chunk out
 ```
+
+Each takes `--device cuda|mps|cpu` (or `VLA_DEVICE=…`): the same frame on two devices is
+a quick check that a GPU computes what the CPU does. On a Mac,
+[docs/thuc-hanh/08-vla-tren-mac.md](docs/thuc-hanh/08-vla-tren-mac.md) (in Vietnamese)
+goes from an empty `runs/` to a fine-tuned SmolVLA and the three tools, with the
+times an M3 takes.
 
 ## What it shows
 

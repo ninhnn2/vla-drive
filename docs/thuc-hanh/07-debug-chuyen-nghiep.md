@@ -795,4 +795,4 @@ Mỗi tầng đều có một lệnh, một con số và một ngưỡng. Debug 
    định nào vào `probe`.
 </details>
 
-**Hết.** Quay lại [mục lục](README.md).
+**Tiếp theo:** [Bài 8 · Chạy và debug VLA (SmolVLA) trên MacBook](08-vla-tren-mac.md)

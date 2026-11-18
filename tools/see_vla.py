@@ -66,8 +66,8 @@ def cells(height: int, width: int, side: tuple[int, int], grid: int) -> list[tup
 class Seer:
     """A checkpoint run in batches, recording on request what the action expert attends to."""
 
-    def __init__(self, checkpoint: Path):
-        self.backend = LeRobotBackend(checkpoint)
+    def __init__(self, checkpoint: Path, device: str | None = None):
+        self.backend = LeRobotBackend(checkpoint, device)
         self.torch, self.config = self.backend.torch, self.backend.config
         self.vlm = self.backend.policy.model.vlm_with_expert
         self.side = tuple(self.config.resize_imgs_with_padding)      # (width, height) SigLIP gets
@@ -458,6 +458,7 @@ def main() -> int:
                         help="average attention and occlusion over every Nth frame of the episode "
                              "(then no per-frame panels unless --frames is given)")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--device", help="cuda, mps or cpu (default: the fastest there is; or $VLA_DEVICE)")
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
@@ -466,8 +467,8 @@ def main() -> int:
     out = args.out or args.project / "reports" / f"see-{name}"
     out.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
-    seer = Seer(checkpoint)
-    print(f"loaded {checkpoint} in {time.perf_counter() - started:.1f} s")
+    seer = Seer(checkpoint, args.device)
+    print(f"loaded {checkpoint} on {seer.backend.device} in {time.perf_counter() - started:.1f} s")
 
     episode = Path(args.episode) if Path(args.episode, "episode.npz").is_file() else args.project / "episodes" / args.episode
     data, labels = np.load(episode / "episode.npz"), read_labels(episode)
