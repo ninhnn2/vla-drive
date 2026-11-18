@@ -30,15 +30,29 @@ class Dataset:
 
     def split(self, validation_fraction: float = 0.1):
         """(train, validation) by whole episodes: frames 0.1 s apart are near-duplicates."""
-        ids = np.unique(self.episode)
-        held = ids[-max(int(round(len(ids) * validation_fraction)), 1):]
-        mask = np.isin(self.episode, held)
+        mask = np.isin(self.episode, held_out(np.unique(self.episode), validation_fraction))
         if mask.all():
             raise ValueError("need at least two episodes to hold one out for validation")
         return self._take(~mask), self._take(mask)
 
     def _take(self, mask) -> "Dataset":
         return Dataset(self.images[mask], self.states[mask], self.plans[mask], self.episode[mask], self.plan_dt)
+
+
+def held_out(ids: np.ndarray, validation_fraction: float = 0.1) -> np.ndarray:
+    """The episodes training holds out for validation: the last tenth, at least one."""
+    return ids[-max(int(round(len(ids) * validation_fraction)), 1):]
+
+
+def split_plans(directory: Path, validation_fraction: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+    """(training plans, validation plans), split as `Dataset.split` does, without loading a single image."""
+    found = episodes(directory)
+    plans = [labels["plans"][labels["valid"]] for labels in map(read_labels, found) if labels is not None]
+    if len(plans) != len(found) or len(found) < 2:
+        raise ValueError(f"need two or more labelled episodes under {directory}")
+    held = set(held_out(np.arange(len(found)), validation_fraction).tolist())
+    return (np.concatenate([p for i, p in enumerate(plans) if i not in held]),
+            np.concatenate([p for i, p in enumerate(plans) if i in held]))
 
 
 def load(directory: Path, hw=IMAGE_HW) -> Dataset:

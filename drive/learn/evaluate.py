@@ -46,8 +46,8 @@ def evaluate(config: EpisodeConfig, tracks=tuple(SHAPES), log=print) -> dict:
 
 def report_name(ref: str, checkpoint: Path) -> str:
     """What a report is called: the version, or for a path, the file's stem or the training run's directory."""
-    if checkpoint.is_file():
-        return Path(ref).stem
+    if checkpoint.is_file():                          # v1.2 -> v1.2, as status looks it up; not v1
+        return checkpoint.stem
     if Path(ref) != checkpoint:                       # a VLA version, such as smolvla-v1
         return str(ref)
     parts = checkpoint.resolve().parts                # <run>/checkpoints/<step>/pretrained_model

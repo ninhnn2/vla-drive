@@ -9,11 +9,15 @@
 From drives to a network that drives (a project lives in runs/drive):
 
     ./drive.sh collect                 record the teacher, with disturbed steering
+    ./drive.sh collect --driver cnn --checkpoint v1 --name dag1    let v1 drive, the teacher labels (DAgger)
     ./drive.sh label                   label drives that came without a plan (ROS 2, a person)
     ./drive.sh validate                check the dataset
     ./drive.sh browse                  look at frames with their labels drawn on the road
-    ./drive.sh train v1                train a network (needs PyTorch: make train)
+    ./drive.sh lrfind                  which learning rates make the loss fall, in under a minute
+    ./drive.sh train v1                train a network (needs PyTorch: make train, or make setup)
     ./drive.sh evaluate v1             drive it on every track
+    ./drive.sh probe v1 report         look inside it: layers, history, training, errors, ablation, activations,
+                                       saliency, behaviour, onpolicy; or all of them as one HTML page
     ./drive.sh sim --policy cnn --checkpoint v1 --show
     ./drive.sh status                  what there is, and the next step
 
