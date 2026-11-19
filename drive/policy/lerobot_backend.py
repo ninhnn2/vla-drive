@@ -49,13 +49,38 @@ def synchronize(torch, device: str) -> None:
         torch.mps.synchronize()
 
 
+def unknown_config_fields(raw: dict, config_class) -> list[str]:
+    """The keys of a checkpoint's config.json that this LeRobot's config class does not have."""
+    import dataclasses
+    return sorted(set(raw) - {field.name for field in dataclasses.fields(config_class)} - {"type"})
+
+
+def load_config(checkpoint: Path, log=print):
+    """The checkpoint's policy config, also when a newer LeRobot wrote it.
+
+    Lab 15 fine-tuned with a LeRobot checkout newer than 0.5.1, the release `make vla-setup`
+    installs, and that checkout writes fields 0.5.1 refuses (`pretrained_revision`). Such
+    fields are dropped, and named, instead of failing to load the checkpoint at all.
+    """
+    import tempfile
+    from lerobot.configs.policies import PreTrainedConfig
+    raw = json.loads((Path(checkpoint) / "config.json").read_text())
+    unknown = unknown_config_fields(raw, PreTrainedConfig.get_choice_class(raw["type"]))
+    if not unknown:
+        return PreTrainedConfig.from_pretrained(checkpoint)
+    log(f"note: {checkpoint} was written by a newer LeRobot; ignoring the config fields it alone has: "
+        f"{', '.join(f'{name}={raw[name]!r}' for name in unknown)}")
+    with tempfile.TemporaryDirectory() as directory:
+        (Path(directory) / "config.json").write_text(json.dumps({k: v for k, v in raw.items() if k not in unknown}))
+        return PreTrainedConfig.from_pretrained(directory)
+
+
 class LeRobotBackend:
     """`infer(observation)` -> an object whose `.chunk` is `(chunk_size, action_dim)`, in robot units."""
 
     def __init__(self, checkpoint: Path, device: str | None = None):
         try:
             import torch
-            from lerobot.configs.policies import PreTrainedConfig
             from lerobot.policies.factory import get_policy_class, make_pre_post_processors
         except ImportError as error:
             raise ValueError(f"the vla policy needs LeRobot ({error}); run it in an environment that has "
@@ -66,7 +91,7 @@ class LeRobotBackend:
                              "point at .../checkpoints/last/pretrained_model")
         self.torch = torch
         self.device = device or pick_device(torch)
-        config = PreTrainedConfig.from_pretrained(checkpoint)
+        config = load_config(checkpoint)
         config.device = self.device
         self.policy = get_policy_class(config.type).from_pretrained(checkpoint, config=config)
         self.policy.to(self.device).eval()

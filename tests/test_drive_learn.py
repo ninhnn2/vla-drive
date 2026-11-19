@@ -371,6 +371,22 @@ class VlaDeviceTests(unittest.TestCase):
             synchronize(torch, device)
         self.assertEqual(torch.calls, ["cuda", "mps"])
 
+    def test_config_fields_only_a_newer_lerobot_knows_are_found(self):
+        from dataclasses import dataclass
+        from drive.policy.lerobot_backend import unknown_config_fields
+
+        @dataclass
+        class Base:
+            device: str = "cpu"
+
+        @dataclass
+        class Config(Base):
+            chunk_size: int = 16
+
+        raw = {"type": "smolvla", "device": "cuda", "chunk_size": 16, "pretrained_revision": None, "z_new": 1}
+        self.assertEqual(unknown_config_fields(raw, Config), ["pretrained_revision", "z_new"])
+        self.assertEqual(unknown_config_fields({"type": "smolvla", "chunk_size": 8}, Config), [])
+
 
 class ExportTests(unittest.TestCase):
     """Episodes as a LeRobotDataset. The per-frame mapping needs only numpy; writing needs lerobot."""
