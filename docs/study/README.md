@@ -70,8 +70,14 @@ it has not reached. So that the two are never confused, claims carry one of thes
 
 ## State of the working tree this guide describes
 
-Branch `smolvla-sim`: the initial commit (`34e83ed`) plus `collect --show/--video`,
-`browse --match`, the `export` stage, the `vla` policy (`LeRobotBackend`), the
-`vla/<version>` checkpoints of `Project`, the HUD's debug panel and `sim --log`.
-82 tests pass in the container (`make test`); on the host Python, 5 of them are
-skipped (PyTorch, ROS 2, LeRobot).
+The initial commit (`34e83ed`) plus:
+- `collect --show/--video` and `browse --match`;
+- the `export` stage, the `vla` policy (`LeRobotBackend`) and the `vla/<version>`
+  checkpoints of `Project`;
+- the HUD's debug panel and `sim --log`;
+- the VLA tools (`tools/probe_vla.py`, `see_vla.py`, `vla_app.py`);
+- the Mac support, with `make vla-setup` and `./vla.sh` on Linux and on a Mac.
+
+103 tests pass in the container (`make test`, 7 skipped: the tiny-VLA tests and the
+Mac GPU test). In `.venv-vla` (`./vla.sh -m unittest discover -s tests -t .`) the 103
+pass with 6 skipped (ROS 2 and the Mac GPU), and CI runs both on Linux and on a Mac.
