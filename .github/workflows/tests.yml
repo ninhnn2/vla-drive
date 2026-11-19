@@ -1,0 +1,77 @@
+# The tests, on Linux and on a Mac, the way README.md says to run them outside the container.
+#
+#   drive  `make test NATIVE=1`: drive/ in .venv (Python 3.10, PyTorch 2.5.1). The ROS 2 tests
+#          skip here; they run in the container (`make test`), which CI does not build.
+#   vla    `make vla-setup`, then every test in .venv-vla (Python 3.12, LeRobot 0.5.1), which
+#          adds tests/test_vla_tools.py: probe_vla, see_vla and the web app on a tiny SmolVLA.
+#
+# The runners have no NVIDIA GPU, so Linux installs PyTorch's CPU build, and the VLA runs on
+# the CPU on both (VLA_DEVICE=cpu): CI checks that the code runs on each platform; the
+# numbers on CUDA and on the Apple GPU are measured in docs/study/17-debugging-the-model.md.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  drive:
+    name: drive/ on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Linux without a GPU - PyTorch's CPU build, and the libraries OpenCV loads
+        if: runner.os == 'Linux'
+        run: |
+          echo "UV_TORCH_BACKEND=cpu" >> "$GITHUB_ENV"
+          sudo apt-get update -q && sudo apt-get install -yq libgl1 libegl1 libxkbcommon0
+      - name: make setup
+        run: make setup
+      - name: make test NATIVE=1
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: make test NATIVE=1
+
+  vla:
+    name: VLA tools on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      VLA_DEVICE: cpu
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Linux without a GPU - PyTorch's CPU build, and the libraries OpenCV loads
+        if: runner.os == 'Linux'
+        run: |
+          echo "UV_TORCH_BACKEND=cpu" >> "$GITHUB_ENV"
+          sudo apt-get update -q && sudo apt-get install -yq libgl1 libegl1 libxkbcommon0
+      - name: make vla-setup
+        run: make vla-setup
+      - name: SmolVLM2's configuration and tokenizer, from the cache or the Hugging Face Hub
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-smolvlm2-${{ runner.os }}-${{ hashFiles('requirements-vla.txt') }}
+      - name: every test, in the LeRobot environment
+        run: ./vla.sh -m unittest discover -s tests -t . -v

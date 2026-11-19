@@ -31,13 +31,25 @@ make test
 make help                      # every target
 ```
 
-`./drive.sh` also runs straight on a PC that has numpy and OpenCV; only training and
-the learned policy need the container's PyTorch.
+On a Mac (Apple Silicon) the same targets run `drive/` natively instead, in a `.venv`
+that `make setup` makes with [uv](https://docs.astral.sh/uv/), and training uses the
+Mac's GPU through PyTorch's MPS backend. Docker on a Mac has no GPU, so the container
+([`compose.mac.yml`](../docker/compose.mac.yml)) is only for ROS 2: arm64, PyTorch for the
+CPU, windows on XQuartz. `NATIVE=0` runs `drive/` in it too; `NATIVE=1` uses `.venv` on
+Linux.
+
+`./drive.sh` also runs straight on a PC that has numpy and OpenCV, and picks up `.venv`
+when there is one; only training and the learned policy need PyTorch.
 
 ```bash
 ./drive.sh sim --latency-ms 400 --max-plan-age-ms 1500 --video runs/slow.mp4
 ./drive.sh sweep                               # tracking error against inference latency
+./drive.sh sim --log runs/actions.csv          # every tick: the policy's action, the motors', and why
 ```
+
+Under the HUD a debug panel shows what the policy is outputting: the chunk in use
+(with the part skipped for latency and the action being played) and the last 5 s of
+the model's commands against what reached the motors.
 
 Tracks: `--track peanut` (default), `oval`, `trefoil`; `--reverse` drives one clockwise.
 
@@ -116,11 +128,19 @@ ROS 2 ───┘                                      ▲          │
 make collect                # the teacher drives 40 times in the simulator: 12 000 frames, ~35 s
 make validate               # is the dataset complete, consistent, varied enough?
 make browse                 # every frame, with its label drawn on the road
-make train V=v1             # ~20 s on an RTX 4060
+make train V=v1             # ~20 s on an RTX 4060, ~2 min on an M3 (MPS), ~10 min on its CPU
 make evaluate V=v1          # drive it on every track, both ways
 make sim ARGS='--policy cnn --checkpoint v1 --track trefoil'
 make status                 # what the project holds, and the next step
 ```
+
+`collect` runs as fast as the PC allows and shows nothing. To watch the teacher drive
+while it records, in real time: `make collect ARGS='--project runs/demo --episodes 2 --show'`
+(`--video FILE` writes the same view; neither changes what is recorded). To look at
+some episodes only: `make browse ARGS="--match 'sim2-*'"`.
+
+`--seed` decides every drive: the same seed under another `--name` records the same
+drives again. More data needs a new seed too: `make collect ARGS='--name sim2 --seed 100'`.
 
 A project is one directory, `runs/drive` unless `--project` says otherwise:
 
@@ -221,7 +241,8 @@ recorder and the training pipeline do not change. Neither exists yet.
 
 Each `make` target is its own container on the host's network, so the nodes find one
 another; `ROS_LOCALHOST_ONLY=1` keeps them off the LAN. Windows (OpenCV, rqt, rviz2)
-open on the host's X server.
+open on the host's X server; on a Mac, on XQuartz, which the containers reach over TCP
+(`make gui` checks that it lets them).
 
 ## From here to a car
 
@@ -229,18 +250,19 @@ open on the host's X server.
    and obeys `/drive/cmd`, as [`sim_node.py`](../ros/src/drive_ros/drive_ros/sim_node.py)
    does for the simulated one.
 2. **Data.** Drive by hand with the recorder running, then label and validate. For a
-   VLA, convert the episodes to a LeRobotDataset: state `[speed, steer]`, action
-   `[steer, throttle]`.
+   VLA, `python -m drive export` (in an environment with LeRobot) writes the episodes
+   as a LeRobotDataset: state `[speed, steer]`, action `[steer, throttle]`.
 3. **Fine-tune and export.** Fine-tune SmolVLA with LeRobot, then, with
    [jetson-orin-nano-vla](https://github.com/eetmie/jetson-orin-nano-vla), `./export.sh`
    the checkpoint on the PC and `./run.sh` the bundle on the Jetson to get its real latency.
 4. **Policy.** Load the bundle's backend and wrap it:
    `BackendPolicy(backend, chunk_size=50, noise_width=32, chunk_dt_s=1 / fps)` in a
-   `ThreadedWorker`. This adapter is tested against a stub backend only; it has not
-   run on a Jetson.
+   `ThreadedWorker`. On a PC, `--policy vla --checkpoint <lerobot checkpoint>` does this
+   with the PyTorch model (`drive/policy/lerobot_backend.py`); a TensorRT backend has
+   not been wired in, and nothing has run on a Jetson.
 
-Not here yet: the real platform, a CARLA bridge, the LeRobot conversion, a fine-tuned
-driving checkpoint. Driving by hand with `teleop` has been started and seen to open its
+Not here yet: the real platform, a CARLA bridge, a VLA on the Jetson. (A SmolVLA
+fine-tuned on the episodes drives the simulator on a PC: docs/study, Lab 15.) Driving by hand with `teleop` has been started and seen to open its
 window, not driven for a recording. The simulator is flat and kinematic: no slip, no camera noise or exposure,
 obstacles are painted on the ground. Treat its numbers as how the loop behaves, not as
 how a car will.

@@ -36,6 +36,7 @@ def evaluate(config: EpisodeConfig, tracks=tuple(SHAPES), log=print) -> dict:
     passed = sum(d["passed"] for d in drives)
     log(f"{passed}/{len(drives)} drives passed")
     return {"policy": config.policy, "checkpoint": config.checkpoint, "latency_ms": config.latency_ms,
+            "max_plan_age_ms": config.max_plan_age_ms,
             "duration_s": config.duration_s, "passed": passed == len(drives),
             "summary": {"drives": len(drives), "drives_passed": passed,
                         "mean_speed_mps": round(sum(d["mean_speed_mps"] for d in drives) / len(drives), 2),
@@ -44,23 +45,42 @@ def evaluate(config: EpisodeConfig, tracks=tuple(SHAPES), log=print) -> dict:
             "drives": drives}
 
 
+def report_name(ref: str, checkpoint: Path) -> str:
+    """What a report is called: the version, or for a path, the file's stem or the training run's directory."""
+    if checkpoint.is_file():                          # v1.2 -> v1.2, as status looks it up; not v1
+        return checkpoint.stem
+    if Path(ref) != checkpoint:                       # a VLA version, such as smolvla-v1
+        return str(ref)
+    parts = checkpoint.resolve().parts                # <run>/checkpoints/<step>/pretrained_model
+    return parts[-4] if len(parts) >= 4 and parts[-3] == "checkpoints" else checkpoint.name
+
+
 def add_parser(sub):
     p = sub.add_parser("evaluate", help="drive models on every track, both ways: the test that counts")
     add_project_argument(p)
     p.add_argument("models", nargs="+", metavar="model",
-                   help=f"a trained version (v1), a checkpoint file, or {' / '.join(SCRIPTED)}")
+                   help=f"a trained version (v1, or a VLA's smolvla-v1), a checkpoint file or LeRobot "
+                        f"checkpoint directory, or {' / '.join(SCRIPTED)}")
     p.add_argument("--tracks", type=lambda s: s.split(","), default=list(SHAPES))
     p.add_argument("--duration-s", type=float, default=40.0)
     p.add_argument("--latency-ms", type=float, default=100.0)
+    p.add_argument("--max-plan-age-ms", type=float, default=600.0,
+                   help="the supervisor brakes when the plan in use is older than this; it must exceed twice "
+                        "the latency (default 600)")
 
 
 def run(project: Project, args) -> int:
     reports = {}
     for ref in args.models:
-        policy = {"policy": ref} if ref in SCRIPTED else {"policy": "cnn", "checkpoint": str(project.checkpoint(ref))}
+        if ref in SCRIPTED:
+            policy, name = {"policy": ref}, ref
+        else:
+            checkpoint = project.checkpoint(ref)
+            policy = {"policy": project.policy_for(checkpoint), "checkpoint": str(checkpoint)}
+            name = report_name(ref, checkpoint)
         print(f"{ref}, {args.latency_ms:.0f} ms per inference, {args.duration_s:.0f} s per drive")
-        name = ref if ref in SCRIPTED else Path(ref).stem
-        reports[name] = evaluate(EpisodeConfig(duration_s=args.duration_s, latency_ms=args.latency_ms, **policy),
+        reports[name] = evaluate(EpisodeConfig(duration_s=args.duration_s, latency_ms=args.latency_ms,
+                                               max_plan_age_ms=args.max_plan_age_ms, **policy),
                                  tuple(args.tracks))
         path = project.report(name)
         path.parent.mkdir(parents=True, exist_ok=True)

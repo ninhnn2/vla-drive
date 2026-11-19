@@ -5,6 +5,7 @@ and a good label's path follows the road in the picture.
 """
 from __future__ import annotations
 
+from fnmatch import fnmatch
 from pathlib import Path
 
 import cv2
@@ -50,11 +51,15 @@ def draw(image, state, action, plan, plan_dt, title: str, camera: Camera) -> np.
     return frame
 
 
-def browse(directory: Path, show: bool = True, video: Path | None = None, every: int = 1) -> int:
-    """Step through a dataset in a window, or write it to a video. Returns the frames shown."""
-    found = episodes(directory)
+def browse(directory: Path, show: bool = True, video: Path | None = None, every: int = 1,
+           match: str = "*") -> int:
+    """Step through a dataset in a window, or write it to a video. Returns the frames shown.
+
+    `match` picks episodes by name, as a shell pattern: 'sim2-*', 'ros-000'.
+    """
+    found = [e for e in episodes(directory) if fnmatch(e.name, match)]
     if not found:
-        raise ValueError(f"no episodes under {directory}")
+        raise ValueError(f"no episodes under {directory}" + (f" named {match!r}" if match != "*" else ""))
     # Frames are numbered through the whole dataset; `starts[i]` is episode i's first.
     starts = np.concatenate([[0], np.cumsum([len(np.load(e / "episode.npz")["t"]) for e in found])])
     camera = Camera(CameraParams())
@@ -96,10 +101,13 @@ def add_parser(sub):
     add_project_argument(p)
     p.add_argument("--video", type=Path, help="write an .mp4 instead of opening a window")
     p.add_argument("--every", type=int, default=1, help="show every Nth frame")
+    p.add_argument("--match", default="*", metavar="PATTERN",
+                   help="only the episodes with this name, a shell pattern: 'sim2-*', ros-000")
 
 
 def run(project, args) -> int:
-    shown = browse(project.episodes, show=args.video is None, video=args.video, every=args.every)
+    shown = browse(project.episodes, show=args.video is None, video=args.video, every=args.every,
+                   match=args.match)
     if args.video:
         print(f"{shown} frames written to {args.video}")
     return 0

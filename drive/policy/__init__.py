@@ -3,7 +3,7 @@ from .base import Policy
 from .lane_camera import LaneCameraPolicy
 from .pure_pursuit import PurePursuitPolicy
 
-POLICIES = ("pure-pursuit", "lane-camera", "cnn")
+POLICIES = ("pure-pursuit", "lane-camera", "cnn", "vla")
 
 
 def make_policy(name: str, *, track, vehicle, camera, checkpoint=None, target_speed_mps=None) -> Policy:
@@ -20,6 +20,13 @@ def make_policy(name: str, *, track, vehicle, camera, checkpoint=None, target_sp
         if speed:
             raise ValueError("the cnn policy drives at the speeds it was shown; a target speed does not apply")
         return CnnPolicy(checkpoint)
+    if name == "vla":
+        from .lerobot_backend import make_vla_policy
+        if not checkpoint:
+            raise ValueError("the vla policy needs a checkpoint (a LeRobot checkpoint directory from lerobot-train)")
+        if speed:
+            raise ValueError("the vla policy drives at the speeds it was shown; a target speed does not apply")
+        return make_vla_policy(checkpoint)
     raise ValueError(f"unknown policy {name!r}; choose from {', '.join(POLICIES)}")
 
 

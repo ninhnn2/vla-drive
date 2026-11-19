@@ -3,18 +3,30 @@
     ./drive.sh sim --show                          watch the default drive
     ./drive.sh sim --latency-ms 400 --video out.mp4
     ./drive.sh sim --obstacle 8 --show             a cone on the track: safety stops the car
+    ./drive.sh sim --log runs/actions.csv          every tick's action, as the policy asked and as applied
     ./drive.sh sweep                               tracking error against inference latency
 
 From drives to a network that drives (a project lives in runs/drive):
 
     ./drive.sh collect                 record the teacher, with disturbed steering
+    ./drive.sh collect --driver cnn --checkpoint v1 --name dag1    let v1 drive, the teacher labels (DAgger)
     ./drive.sh label                   label drives that came without a plan (ROS 2, a person)
     ./drive.sh validate                check the dataset
     ./drive.sh browse                  look at frames with their labels drawn on the road
-    ./drive.sh train v1                train a network (needs PyTorch: make train)
+    ./drive.sh lrfind                  which learning rates make the loss fall, in under a minute
+    ./drive.sh train v1                train a network (needs PyTorch: make train, or make setup)
     ./drive.sh evaluate v1             drive it on every track
+    ./drive.sh probe v1 report         look inside it: layers, history, training, errors, ablation, activations,
+                                       saliency, behaviour, onpolicy; or all of them as one HTML page
     ./drive.sh sim --policy cnn --checkpoint v1 --show
     ./drive.sh status                  what there is, and the next step
+
+Towards a VLA (needs an environment with lerobot; see docs/study/13-vla-and-smolvla.md):
+
+    python -m drive export             the episodes as a LeRobotDataset (runs/drive/lerobot)
+    lerobot-train ...                  fine-tune SmolVLA into runs/drive/vla/<version>
+    python -m drive sim --policy vla --checkpoint smolvla-v1
+    python -m drive evaluate smolvla-v1
 """
 from __future__ import annotations
 
@@ -34,7 +46,9 @@ def episode_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--policy", choices=POLICIES, default="pure-pursuit",
                    help="pure-pursuit: a teacher that knows the map; lane-camera: follows the road it sees; "
                         "cnn: a network trained with ./drive.sh train")
-    p.add_argument("--checkpoint", help="for --policy cnn: a trained version (v1) or a checkpoint file")
+    p.add_argument("--checkpoint", help="for --policy cnn: a trained version (v1) or a checkpoint file; "
+                                        "for --policy vla: a version in <project>/vla (smolvla-v1) or a "
+                                        "LeRobot checkpoint directory")
     add_project_argument(p)
     p.add_argument("--track", choices=list(SHAPES), default="peanut")
     p.add_argument("--reverse", action="store_true", help="drive the track clockwise")
@@ -62,17 +76,21 @@ def cmd_sim(args) -> int:
                          latency_compensation=not args.no_latency_compensation,
                          realtime=args.realtime or args.show)
     on_tick, closers = None, []
-    if args.show or args.video or args.record:
-        from .recorder import Recorder
-        from .viewer import Hud, Output
-        output = Output(args.show, args.video, fps=25) if args.show or args.video else None
+    if args.show or args.video or args.record or args.log:
+        from .recorder import ActionLog, Recorder
+        from .viewer import HUD_HEIGHT, WIDTH, Hud, Output
+        output = Output(args.show, args.video, fps=25, size=(WIDTH, HUD_HEIGHT)) if args.show or args.video else None
         recorder = Recorder(args.record, task="drive along the track") if args.record else None
+        log = ActionLog(args.log) if args.log else None
         hud, count = None, 0
 
         def on_tick(world, loop, tick):
             nonlocal hud, count
             if recorder is not None and recorder.due(tick.t):
                 recorder.add(tick.t, world.image(), world.state.speed, world.state.steer, tick.decision.action)
+            if log is not None:
+                state = world.state
+                log.add(tick, loop.executor.chunk, state.speed, state.steer, world.track.project(state.x, state.y)[1])
             count += 1
             if output is None or count % 2:
                 return True
@@ -82,14 +100,14 @@ def cmd_sim(args) -> int:
                 loop.safety.estop(not loop.safety.estopped)
             return key not in ("q", "\x1b")
 
-        closers = [c for c in (output and output.close, recorder and recorder.save) if c]
+        closers = [c for c in (output and output.close, recorder and recorder.save, log and log.close) if c]
     try:
         result = run(config, on_tick)
     finally:
         for close in closers:
             close()
     print(report(result))
-    for label, path in (("video", args.video), ("recording", args.record)):
+    for label, path in (("video", args.video), ("recording", args.record), ("action log", args.log)):
         if path:
             print(f"  {label}: {path}")
     if args.out:
@@ -146,6 +164,8 @@ def main(argv=None) -> int:
     sim.add_argument("--realtime", action="store_true", help="real clock and inference thread, without a window")
     sim.add_argument("--video", type=Path, help="write the HUD to an .mp4")
     sim.add_argument("--record", type=Path, help="save frames, states and actions to this directory")
+    sim.add_argument("--log", type=Path, metavar="CSV",
+                     help="write every control tick: the policy's action, what went to the motors, and why")
     sim.add_argument("--out", type=Path, help="write the result as JSON")
     sim.set_defaults(run=cmd_sim)
 

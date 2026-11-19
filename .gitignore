@@ -4,3 +4,5 @@ runs/
 ros/build/
 ros/install/
 ros/log/
+.venv/
+.venv-vla/
