@@ -53,24 +53,39 @@ the left when a model is new (is the data what you think?).
 | `evaluate`, `sweep` | closed-loop results, latency sensitivity | chapters [11](11-model-evaluation.md), [5](05-action-chunking-and-latency.md) |
 | a debugger | stop inside any function, inspect tensors | §5 |
 
-All model-side commands run with the LeRobot environment, from the repository root:
+All model-side commands run in the LeRobot environment, from the repository root, the
+same way on Linux and on a Mac:
 
 ```bash
-export D=/home/fanning/data1/AI_SOURCE/smolvla-local HF_HOME=/home/fanning/data1/AI_SOURCE/smolvla-local/hf
-export V=$D/.venv/bin/python PYTHONPATH=.
-cd /home/fanning/data1/AI_SOURCE/vla-drive
+make vla-setup              # once: .venv-vla (Python 3.12, LeRobot 0.5.1, gradio), with uv
+export V=./vla.sh           # that environment's Python, with PYTHONPATH=. set
 ```
 
-**On a Mac (or anywhere, without that folder):** `make vla-setup` makes the environment
-in `.venv-vla`, and `./vla.sh` stands for `$V` with `PYTHONPATH=.` set, so `$V tools/see_vla.py`
-becomes `./vla.sh tools/see_vla.py`. The model runs on the Apple GPU (MPS); each tool takes
-`--device` (or `VLA_DEVICE`) to choose, and running one frame on `mps` and on `cpu` is how
-to check that the GPU computes what the CPU does (the MPS bug in
-[docs/thuc-hanh, lesson 6](../thuc-hanh/06-debug-model.md) was found that way). Measured on
-an M3 (10-core GPU, 16 GB), LeRobot 0.5.1: one chunk with 10 denoising steps takes about
-360 ms, `see_vla.py` about 30 s per frame with two noises, and the web app answers in about
-1 s. The whole route on a Mac, with outputs, is
-[docs/thuc-hanh/08-vla-tren-mac.md](../thuc-hanh/08-vla-tren-mac.md).
+- **Another environment.** `export VLA_VENV=/path/to/venv` makes `./vla.sh` use it. Lab 15's
+  environment, built from a LeRobot checkout (0.5.2), is where this chapter was first
+  measured. A checkpoint written by a newer LeRobot also loads in 0.5.1: `LeRobotBackend`
+  drops the config fields 0.5.1 does not know and names them (`pretrained_revision`).
+  Measured on `smolvla-v1` (2026-11-19, Linux, LeRobot 0.5.1, PyTorch 2.10):
+  - frame 235 steers −0.4874 against −0.488 on 0.5.2;
+  - the occlusion cells agree within 0.003;
+  - the nine probes print the outputs quoted below to within 0.002 (timing aside).
+- **Disk.** The first load downloads SmolVLM2 (about 1 GB) to `~/.cache/huggingface`. If
+  that disk is short of space, `export HF_HOME=/a/disk/with/room/hf`.
+- **Device.** The model runs on CUDA, else on a Mac's GPU (MPS), else on the CPU. Each
+  tool takes `--device`, or `VLA_DEVICE` for any command. Running one frame on two
+  devices checks that the GPU computes what the CPU does; that is how the MPS bug in
+  [docs/thuc-hanh, lesson 6](../thuc-hanh/06-debug-model.md) was found.
+  - Linux (RTX 4060 against its CPU): frame 235 with one noise steers −0.443 on CUDA and
+    −0.440 on the CPU, and the occlusion cells agree within 0.006. The CPU took 224 s for
+    that frame with its occlusion map, CUDA 2 s.
+  - Mac (M3, 10-core GPU, 16 GB), LeRobot 0.5.1: one chunk with 10 denoising steps takes
+    about 360 ms, `see_vla.py` about 30 s per frame with two noises, and the web app
+    answers in about 1 s. The whole route on a Mac, with outputs, is
+    [docs/thuc-hanh/08-vla-tren-mac.md](../thuc-hanh/08-vla-tren-mac.md).
+- **Tests.** `./vla.sh -m unittest tests.test_vla_tools` runs `probe_vla.py`,
+  `see_vla.py` and the web app's logic on a tiny untrained SmolVLA, built in seconds:
+  about 2 minutes on a CPU. CI runs it, and every other test, on Linux and on a Mac
+  (`.github/workflows/tests.yml`).
 
 ---
 
@@ -170,7 +185,7 @@ the pipeline (targets, normalisation, frozen parameters), not in the amount of d
 
 ```bash
 $V -m drive export --match 'sim-000' --out /tmp/one-episode
-$D/.venv/bin/lerobot-train --policy.path=lerobot/smolvla_base \
+$V lerobot-train --policy.path=lerobot/smolvla_base \
   --dataset.repo_id=local/one --dataset.root=/tmp/one-episode \
   --rename_map='{"observation.images.front": "observation.images.camera1"}' \
   --policy.chunk_size=16 --policy.n_action_steps=16 --batch_size=8 --steps=400 --log_freq=50 \
@@ -513,12 +528,13 @@ A tool that rules a cause out is as useful as one that finds it.
 
 The probes and `see_vla.py` answer fixed questions. [`tools/vla_app.py`](../../tools/vla_app.py)
 is a small web app for your own: give the model one image, change one thing, and see
-what it does. It needs gradio in the LeRobot environment, installed once. The install
-measured here added 15 packages (gradio 6.32) and changed none of the existing ones:
+what it does. It needs gradio, which `make vla-setup` installs. In another LeRobot
+environment, `uv pip install --python $VLA_VENV gradio` adds it. On this laptop's
+environment that added 15 packages (gradio 6.32) and changed none of the existing ones:
 
 ```bash
-UV_CACHE_DIR=$D/uv-cache uv pip install --python $V gradio
 $V tools/vla_app.py                 # loads the model (about 10 s), then open http://127.0.0.1:7860
+$V tools/vla_app.py --open          # the same, and opens the browser
 ```
 
 It listens on this computer only. The image editor draws with WebGL, which every
@@ -639,7 +655,7 @@ Change one component, keep the rest, and see whether the symptom moves with it:
 ### In VS Code
 
 Add a configuration to `.vscode/launch.json` that uses the LeRobot environment's
-Python, then set breakpoints in
+Python (`.venv-vla`, or your `VLA_VENV`), then set breakpoints in
 [`LeRobotBackend.infer`](../../drive/policy/lerobot_backend.py),
 [`ChunkExecutor.action`](../../drive/control/executor.py#L34) or
 [`SafetySupervisor.filter`](../../drive/safety.py#L33), or in LeRobot's
@@ -652,11 +668,11 @@ Python, then set breakpoints in
   "request": "launch",
   "module": "drive",
   "args": ["sim", "--policy", "vla", "--checkpoint", "smolvla-v1", "--latency-ms", "125", "--duration-s", "5"],
-  "python": "/home/fanning/data1/AI_SOURCE/smolvla-local/.venv/bin/python",
+  "python": "${workspaceFolder}/.venv-vla/bin/python",
   "cwd": "${workspaceFolder}",
   "env": {
     "PYTHONPATH": "${workspaceFolder}",
-    "HF_HOME": "/home/fanning/data1/AI_SOURCE/smolvla-local/hf",
+    "PYTORCH_ENABLE_MPS_FALLBACK": "1",
     "HF_HUB_OFFLINE": "1"
   },
   "justMyCode": false

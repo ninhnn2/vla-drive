@@ -1,5 +1,7 @@
 # vla-drive
 
+[![tests](https://github.com/ninhnn2/vla-drive/actions/workflows/tests.yml/badge.svg)](https://github.com/ninhnn2/vla-drive/actions/workflows/tests.yml)
+
 A small self-driving stack for learning, built around the way a vision-language-action
 (VLA) model answers: slowly, and with a chunk of future actions. It has a simulated
 1:10 car, a 50 Hz control loop with a safety supervisor, a data pipeline that takes
@@ -83,7 +85,7 @@ the Apple GPU (MPS). The setup and every flag are in Lab 15 of
 [docs/study/15-hands-on-labs.md](docs/study/15-hands-on-labs.md).
 
 ```bash
-make vla-setup                          # once: about 1.6 GB
+make vla-setup                          # once, with uv: about 1.6 GB on a Mac, several GB on Linux (CUDA)
 ./vla.sh -m drive export                # the episodes as a LeRobotDataset, in runs/drive/lerobot
 ./vla.sh lerobot-train --policy.path=lerobot/smolvla_base ...   # 2000 steps of batch 16 on an 8 GB laptop GPU
 ./vla.sh -m drive sim --policy vla --checkpoint smolvla-v1 --show
@@ -103,6 +105,17 @@ a quick check that a GPU computes what the CPU does. On a Mac,
 [docs/thuc-hanh/08-vla-tren-mac.md](docs/thuc-hanh/08-vla-tren-mac.md) (in Vietnamese)
 goes from an empty `runs/` to a fine-tuned SmolVLA and the three tools, with the
 times an M3 takes.
+
+- `VLA_VENV=/path/to/venv ./vla.sh …` uses another LeRobot environment, such as one built
+  from a LeRobot checkout.
+- A checkpoint fine-tuned with a newer LeRobot loads in 0.5.1: the config fields 0.5.1
+  does not know are dropped, and named.
+- If `~/.cache` is short of space, set `HF_HOME` (the model is about 1 GB) and
+  `UV_CACHE_DIR`.
+- CI runs every test on Linux and on a Mac, in both environments.
+  `tests/test_vla_tools.py` runs the three tools on a tiny untrained SmolVLA, so
+  `./vla.sh -m unittest tests.test_vla_tools` checks a setup in about 2 minutes without
+  a checkpoint.
 
 ## What it shows
 
@@ -132,8 +145,11 @@ drive/learn/    the data pipeline: collect, label, validate, browse, train, eval
 ros/            ROS 2 nodes: the simulated car, the driver, teleop, the recorder
 tools/          probe_vla, see_vla, vla_app: study and debug a fine-tuned VLA
 docs/study/     a study guide: 18 chapters with labs, a glossary and draw.io diagrams
+docs/thuc-hanh/ a hands-on course in Vietnamese, lessons 1-8 (lesson 8: the VLA on a Mac)
 docker/         the container everything runs in (compose.mac.yml: on a Mac); Makefile has the commands
-tests/          make test
+vla.sh          runs the LeRobot environment's Python (make vla-setup) with this repository on the path
+tests/          make test; ./vla.sh -m unittest discover -s tests -t . in the LeRobot environment
+.github/        CI: every test on Linux and on a Mac
 runs/           datasets, models and reports (not in git)
 ```
 

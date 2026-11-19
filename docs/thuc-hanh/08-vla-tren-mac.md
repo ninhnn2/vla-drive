@@ -202,9 +202,17 @@ và các lệnh bên dưới gọi nó là `--checkpoint smolvla-mac`.
 **Có sẵn checkpoint train trên máy khác?** Chép cả thư mục
 `runs/drive/vla/<tên>/checkpoints/last/pretrained_model` sang
 `runs/drive/vla/<tên>/checkpoints/last/` trên Mac, rồi dùng `--checkpoint <tên>`. Thư mục
-này chứa trọng số, cấu hình và bộ chuẩn hóa dữ liệu. Lưu ý: checkpoint `smolvla-v1` của
-Lab 15 được train bằng bản 0.5.2 lấy từ GitHub; việc nạp nó bằng 0.5.1 **chưa được kiểm
-chứng** trong bộ bài này.
+này chứa trọng số, cấu hình và bộ chuẩn hóa dữ liệu.
+
+Checkpoint `smolvla-v1` của Lab 15 được train bằng bản 0.5.2 lấy từ GitHub. Bản này ghi
+thêm trường `pretrained_revision` vào `config.json`, và LeRobot 0.5.1 từ chối nạp với lỗi
+`DecodingError`. `LeRobotBackend` của repo bỏ những trường mà bản đang cài không biết, rồi
+in ra tên của chúng. Phép thử đã chạy trên Linux ngày 2026-11-19 với LeRobot 0.5.1:
+- tay lái ở frame 235 là −0,4874, so với −0,488 khi chạy bằng 0.5.2;
+- bản đồ che ô lệch dưới 0,003;
+- chín phép đo của `probe_vla.py` lệch dưới 0,002.
+
+Trên Mac thì chưa chạy phép thử này với `smolvla-v1`.
 
 ## 8.5 Lái thử: độ trễ trên Mac
 
@@ -499,6 +507,7 @@ một kết quả nào đó, có thể chạy lại đúng lệnh đó trên CPU
 | `ModuleNotFoundError: No module named 'cv2'` sau khi gỡ bản headless | hai bản OpenCV dùng chung thư mục `cv2`, gỡ một bản là mất file của bản kia | cài lại: `uv pip install --reinstall --no-deps --python .venv-vla/bin/python "opencv-python==<cùng phiên bản>"` |
 | `lerobot requires numpy<2.3.0, but 2.5.5 is installed` | cài thêm một gói làm numpy bị nâng lên | `rm .venv-vla/.installed && make vla-setup` (nhớ dùng `--no-deps` khi cài lẻ) |
 | `unrecognized arguments: --dataset.eval_split …` | các cờ này chỉ có trong LeRobot 0.5.2 | bỏ chúng đi (mục 8.4) |
+| `DecodingError: The fields pretrained_revision are not valid for SmolVLAConfig` | checkpoint do LeRobot 0.5.2 ghi, nạp thẳng bằng LeRobot 0.5.1 | dùng công cụ của repo (`./vla.sh tools/…`, `-m drive sim`), vì chúng tự bỏ trường này; nếu gọi LeRobot trực tiếp thì xoá dòng `pretrained_revision` trong `config.json` |
 | `objc[…]: Class AVFFrameReceiver is implemented in both …` | hai bản thư viện ffmpeg (của PyAV và của Homebrew) | vô hại, bỏ qua |
 | `You are sending unauthenticated requests to the HF Hub` | chưa đăng nhập Hugging Face | vô hại; đặt `HF_TOKEN` nếu bị giới hạn tốc độ tải |
 | `NotImplementedError: … not currently implemented for the MPS device` | một phép toán chưa có bản cho GPU Mac | chạy qua `./vla.sh` (nó đặt `PYTORCH_ENABLE_MPS_FALLBACK=1`), hoặc thêm `--device cpu` |

@@ -545,62 +545,65 @@ the first download (about 4 GB of packages, 3 GB of model).
 [`drive/policy/vla.py`](../../drive/policy/vla.py).
 
 **Status.** Every command below was run for this guide on 2026-11-17 on the laptop
-this repository lives on (RTX 4060 Laptop GPU, 8 GB, driver 535) with LeRobot 0.5.2
-(the local clone at `/home/fanning/data1/AI_SOURCE/VLA/lerobot`, commit `3dd19d043`).
-The numbers under *expected* are from those runs. The Colab part at the end was **not**
-run.
+this repository lives on (RTX 4060 Laptop GPU, 8 GB, driver 535), with LeRobot 0.5.2: a
+checkout at commit `3dd19d043` (`v0.5.1-151`), in the environment of *Another
+environment* below. The numbers under *expected* are from those runs. On 2026-11-19 the
+same laptop ran Step 1 (on two episodes), Step 3 (a 20 s drive) and the tools of
+[chapter 17](17-debugging-the-model.md) again in `make vla-setup`'s environment, with
+LeRobot 0.5.1. The Colab part at the end
+was **not** run.
 
-### Step 0: a LeRobot environment, once (about 30 minutes, mostly downloading)
+### Step 0: a LeRobot environment, once
 
 The project's container has PyTorch but not LeRobot, and LeRobot needs Python 3.12. So
-LeRobot gets its own virtual environment, outside the repository. Put it, and every
-cache, on a disk with space: on this laptop `/` had only 21 GB free, and both uv and
-Hugging Face cache to `~/.cache` (on `/`) by default.
+LeRobot gets its own virtual environment, `.venv-vla`, made the same way on Linux and on
+a Mac. It needs [uv](https://docs.astral.sh/uv/):
 
 ```bash
-D=/home/fanning/data1/AI_SOURCE/smolvla-local          # everything in one folder; delete it to undo
-mkdir -p $D && cd $D
-export UV_CACHE_DIR=$D/uv-cache UV_PYTHON_INSTALL_DIR=$D/python HF_HOME=$D/hf
-uv venv --python 3.12 .venv
-uv pip install --python .venv "/home/fanning/data1/AI_SOURCE/VLA/lerobot[smolvla,dataset,training]"
-.venv/bin/python -c "import torch, lerobot; print(torch.__version__, torch.cuda.is_available(), lerobot.__version__)"
+make vla-setup              # Python 3.12, LeRobot 0.5.1 from PyPI, gradio, OpenCV with windows
+export V=./vla.sh           # that environment's Python, with PYTHONPATH=. set
+$V -c "import torch, lerobot; print(torch.__version__, torch.cuda.is_available(), lerobot.__version__)"
 ```
 
-*Expected:* `2.11.0+cu128 True 0.5.2` and a 7.4 GB `.venv`. The CUDA 12.8 build of
-PyTorch runs on driver 535 (CUDA 12.2) here.
+*Expected* on this laptop: `2.10.0+cu128 True 0.5.1`, in about a minute with uv's cache
+already filled. Without a cache it is mostly downloading. `$V -m drive …` runs this
+repository's CLI (the same commands as `./drive.sh`) inside that environment, and
+`$V lerobot-train …` runs LeRobot's programs.
 
-The extras are `smolvla,dataset,training`. The Colab notebook writes `train`, which
-does not exist in LeRobot 0.5.2.
+- **Disk.** uv and Hugging Face cache to `~/.cache` by default. The environment takes
+  about 1.6 GB on a Mac and several GB on Linux, where PyTorch comes with CUDA. The model
+  adds about 3 GB. If that disk is short of space, put both caches elsewhere first:
+  `export UV_CACHE_DIR=/a/disk/with/room/uv HF_HOME=/a/disk/with/room/hf`. Set
+  `HF_HOME` in every later shell too, or the model is downloaded a second time.
+- **OpenCV.** LeRobot installs `opencv-python-headless`, which cannot open a window.
+  `make vla-setup` swaps it for the windowed build of the same version, for `--show` in
+  Step 3.
+- **Another environment.** `export VLA_VENV=/path/to/venv` makes `./vla.sh` use it. This
+  guide was first run in one built from a LeRobot checkout:
 
-LeRobot installs `opencv-python-headless`, which cannot open a window. For `--show`
-(Step 3), swap it for the windowed build of the same version, once:
+  ```bash
+  D=/a/disk/with/room/smolvla-local      # everything in one folder; delete it to undo
+  export UV_CACHE_DIR=$D/uv-cache UV_PYTHON_INSTALL_DIR=$D/python HF_HOME=$D/hf
+  uv venv --python 3.12 $D/.venv
+  uv pip install --python $D/.venv "/path/to/lerobot[smolvla,dataset,training]"
+  export VLA_VENV=$D/.venv
+  ```
 
-```bash
-uv pip uninstall --python .venv opencv-python-headless
-uv pip install --python .venv "opencv-python==4.13.0.92"     # the version the headless one was
-```
-
-**Every later shell** needs the cache location again, or the model is downloaded to
-`/` a second time:
-
-```bash
-export D=/home/fanning/data1/AI_SOURCE/smolvla-local HF_HOME=/home/fanning/data1/AI_SOURCE/smolvla-local/hf
-export V=$D/.venv/bin/python                           # the LeRobot environment's Python
-cd /home/fanning/data1/AI_SOURCE/vla-drive && export PYTHONPATH=.
-```
-
-With `PYTHONPATH=.`, `$V -m drive …` runs this repository's CLI (the same commands as
-`./drive.sh`) inside the LeRobot environment.
-
-**On a Mac (Apple Silicon)**, or anywhere without that folder: `make vla-setup` makes the
-same kind of environment in `.venv-vla` (Python 3.12, LeRobot **0.5.1** from PyPI, the
-nearest release to the 0.5.2 checkout above, and gradio, with OpenCV's windowed build), and
-`./vla.sh` stands for `$V` with `PYTHONPATH=.` and `PYTORCH_ENABLE_MPS_FALLBACK=1` set. Two
-differences show up: 0.5.1 has no `--dataset.eval_split`, `--eval_steps` or
-`--max_eval_samples` (leave them out of Step 2), and the device is `--policy.device=mps`
-with `--batch_size=8` in 16 GB. On an M3 a step of batch 8 takes about 2 s. The whole route
-on a Mac, with its outputs, is [docs/thuc-hanh/08-vla-tren-mac.md](../thuc-hanh/08-vla-tren-mac.md)
-(in Vietnamese).
+  *Expected:* `2.11.0+cu128 True 0.5.2` and a 7.4 GB `.venv`. The extras are
+  `smolvla,dataset,training`; the Colab notebook writes `train`, which does not exist in
+  LeRobot 0.5.2. Swap OpenCV as `make vla-setup` does: uninstall
+  `opencv-python-headless`, then install `opencv-python` of the same version.
+- **0.5.1 against 0.5.2.**
+  - 0.5.1 has no `--dataset.eval_split`, `--eval_steps` or `--max_eval_samples`; leave
+    them out of Step 2.
+  - A checkpoint fine-tuned with 0.5.2 loads in 0.5.1. `LeRobotBackend` drops the one
+    config field 0.5.1 does not know (`pretrained_revision`) and says so. On
+    `smolvla-v1` the outputs agreed within 0.003 ([chapter 17](17-debugging-the-model.md)).
+- **On a Mac (Apple Silicon).** The model runs on the Apple GPU (MPS); `./vla.sh` sets
+  `PYTORCH_ENABLE_MPS_FALLBACK=1` for the few operators without an MPS version. Train with
+  `--policy.device=mps`, and with `--batch_size=8` in 16 GB; on an M3 a step of batch 8
+  takes about 2 s. The whole route on a Mac, with its outputs, is
+  [docs/thuc-hanh/08-vla-tren-mac.md](../thuc-hanh/08-vla-tren-mac.md) (in Vietnamese).
 
 ### Step 1: export the episodes (seconds)
 
@@ -633,7 +636,7 @@ the next 16 frames' actions.
 
 ```bash
 mkdir -p runs/drive/vla
-HF_HUB_DISABLE_TELEMETRY=1 $D/.venv/bin/lerobot-train \
+$V lerobot-train \
   --policy.path=lerobot/smolvla_base \
   --dataset.repo_id=local/vla-drive --dataset.root=$PWD/runs/drive/lerobot \
   --rename_map='{"observation.images.front": "observation.images.camera1"}' \
