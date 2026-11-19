@@ -252,6 +252,59 @@ def table(seen, plan, dt) -> list[list]:
 
 # ---- the app ----
 
+class AppError(Exception):
+    """A problem with what was asked, to show to the user."""
+
+
+def load_frame(lab: Lab, episode: str, frame: int):
+    """A frame of an episode: (editor value, speed, wheels, the loaded frame, a note, the frame, the last frame)."""
+    directory = lab.project.episodes / episode
+    data, labels = np.load(directory / "episode.npz"), read_labels(directory)
+    last = len(data["t"]) - 1
+    frame = int(min(max(frame, 0), last))
+    image = data["images"][frame]
+    speed, steer = (float(v) for v in data["states"][frame])
+    plan = None if labels is None else labels["plans"][frame]
+    loaded = {"image": image, "plan": plan, "name": f"{episode} frame {frame}"}
+    note = (f"Loaded **{episode} frame {frame}** (t {data['t'][frame]:.1f} s). "
+            + ("The teacher's plan is shown in cyan." if plan is not None else "This episode has no labels."))
+    return {"background": image, "layers": [], "composite": image}, speed, steer, loaded, note, frame, last
+
+
+def answer(lab: Lab, value, loaded, speed, steer, task, seed, samples, steps, fit, mirror, brightness, hide, fill,
+           occlusion):
+    """Everything the app shows for one request: the path view, the summary, the chunk plot, the model input,
+    the attention, the occlusion map (or None) and the table."""
+    image = editor_image(value)
+    if image is None:
+        raise AppError("load a frame or upload an image first")
+    background = editor_image({"composite": value.get("background")}) if isinstance(value, dict) else None
+    plan = loaded["plan"] if loaded and same_picture(background, loaded["image"]) else None
+    edits = []
+    if plan is not None and image.shape == loaded["image"].shape and changed_pixels(image, loaded["image"]):
+        edits.append(f"painted ({changed_pixels(image, loaded['image'])} pixels)")
+    if fit and image.shape[:2] != (CAMERA_H, CAMERA_W):
+        edits.append(f"resized from {image.shape[1]}x{image.shape[0]} to {CAMERA_W}x{CAMERA_H}")
+    if mirror:
+        edits.append("mirrored, wheels and the teacher's steering negated")
+        steer = -steer
+        plan = None if plan is None else plan * np.array([-1.0, 1.0])
+    if brightness != 1.0:
+        edits.append(f"brightness x{brightness:.2f}")
+    image, hidden = prepare(image, fit, mirror, brightness, hide, fill, lab.seer.side)
+    if BANDS[hide] is not None:
+        edits.append(f"{hide} filled with {fill}: {hidden} pixels changed"
+                     + (" (it is uniform here: try grey)" if hidden == 0 else ""))
+    seen, boxes, moved, elapsed = lab.run(image, speed, steer, task, seed, samples, steps, occlusion)
+    return (path_view(lab, image, seen["chunks"], plan, speed, steer),
+            summary(lab, seen, plan, speed, steer, int(steps), elapsed, edits, boxes, moved),
+            chunk_plot(seen, plan, lab.dt),
+            banded(model_input_view(seen, TILE_H, seen["grid"])),
+            banded(attention_view(seen, TILE_H, seen["grid"])[0]),
+            occlusion_view(image, boxes, moved) if moved is not None else None,
+            table(seen, plan, lab.dt))
+
+
 def build(lab: Lab):
     import gradio as gr
 
@@ -260,48 +313,15 @@ def build(lab: Lab):
 
     def load(episode, frame):
         if episode is None:
-            raise gr.Error("no episodes in this project")
-        directory = lab.project.episodes / episode
-        data, labels = np.load(directory / "episode.npz"), read_labels(directory)
-        frame = int(min(max(frame, 0), len(data["t"]) - 1))
-        image = data["images"][frame]
-        speed, steer = (float(v) for v in data["states"][frame])
-        plan = None if labels is None else labels["plans"][frame]
-        loaded = {"image": image, "plan": plan, "name": f"{episode} frame {frame}"}
-        note = (f"Loaded **{episode} frame {frame}** (t {data['t'][frame]:.1f} s). "
-                + ("The teacher's plan is shown in cyan." if plan is not None else "This episode has no labels."))
-        editor = {"background": image, "layers": [], "composite": image}
-        return editor, speed, steer, loaded, note, gr.Slider(maximum=len(data["t"]) - 1, value=frame)
+            raise gr.Error("no episodes in this project: upload an image instead")
+        editor, speed, steer, loaded, note, frame, last = load_frame(lab, episode, frame)
+        return editor, speed, steer, loaded, note, gr.Slider(maximum=last, value=frame)
 
-    def infer(value, loaded, speed, steer, task, seed, samples, steps, fit, mirror, brightness, hide, fill, occlusion):
-        image = editor_image(value)
-        if image is None:
-            raise gr.Error("load a frame or upload an image first")
-        background = editor_image({"composite": value.get("background")}) if isinstance(value, dict) else None
-        plan = loaded["plan"] if loaded and same_picture(background, loaded["image"]) else None
-        edits = []
-        if plan is not None and image.shape == loaded["image"].shape and changed_pixels(image, loaded["image"]):
-            edits.append(f"painted ({changed_pixels(image, loaded['image'])} pixels)")
-        if fit and image.shape[:2] != (CAMERA_H, CAMERA_W):
-            edits.append(f"resized from {image.shape[1]}x{image.shape[0]} to {CAMERA_W}x{CAMERA_H}")
-        if mirror:
-            edits.append("mirrored, wheels and the teacher's steering negated")
-            steer = -steer
-            plan = None if plan is None else plan * np.array([-1.0, 1.0])
-        if brightness != 1.0:
-            edits.append(f"brightness x{brightness:.2f}")
-        image, hidden = prepare(image, fit, mirror, brightness, hide, fill, lab.seer.side)
-        if BANDS[hide] is not None:
-            edits.append(f"{hide} filled with {fill}: {hidden} pixels changed"
-                         + (" (it is uniform here: try grey)" if hidden == 0 else ""))
-        seen, boxes, moved, elapsed = lab.run(image, speed, steer, task, seed, samples, steps, occlusion)
-        return (path_view(lab, image, seen["chunks"], plan, speed, steer),
-                summary(lab, seen, plan, speed, steer, int(steps), elapsed, edits, boxes, moved),
-                chunk_plot(seen, plan, lab.dt),
-                banded(model_input_view(seen, TILE_H, seen["grid"])),
-                banded(attention_view(seen, TILE_H, seen["grid"])[0]),
-                occlusion_view(image, boxes, moved) if moved is not None else None,
-                table(seen, plan, lab.dt))
+    def infer(*args):
+        try:
+            return answer(lab, *args)
+        except AppError as error:
+            raise gr.Error(str(error)) from error
 
     with gr.Blocks(title=f"{lab.name}: input an image, see the output") as app:
         gr.Markdown(f"## {lab.name}: give the VLA an image, see what it would do\n"
@@ -359,7 +379,8 @@ def build(lab: Lab):
                        outputs=[path, numbers, chunk, model_input, attention, occluded, rows], concurrency_limit=1)
         run.click(**running)
         # Loading a frame runs the model on it too, so the frame slider scrubs through an episode.
-        for event in (load_button.click, frame.release, episode.input, app.load):
+        # Without episodes (a fresh clone), the page opens empty, ready for an upload.
+        for event in (load_button.click, frame.release, episode.input) + ((app.load,) if names else ()):
             event(**loading).then(**running)
     return app
 
