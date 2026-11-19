@@ -222,7 +222,7 @@ with a human).
 | 1 | ~~Episode → LeRobotDataset conversion, including the choice of `action`~~ **done**: `export` | — | software, PC |
 | 2 | ~~Fine-tune SmolVLA; drive it in the simulator via a PyTorch backend~~ **done once** (2000 steps; Lab 15) | 1 | ML, PC |
 | 3 | ~~Register `vla` in `make_policy`, the CLI and the driver node~~ **done** for LeRobot checkpoints; a TensorRT-bundle backend remains | 2 | software |
-| 4 | Export; build engines; measure latency of the *fine-tuned* model on the board | 2 | Jetson |
+| 4 | ~~Export; build engines; measure latency of the *fine-tuned* model on the board~~ **done** for a C++ probe ([`jetson/smolvla_trt`](../../jetson/smolvla_trt/README.md)): three FP16 engines, 82 ms per chunk, within 0.002 of fp32. Not yet behind `BackendPolicy` in the control loop | 2 | Jetson |
 | 5 | Run the driver on the Jetson against the simulator node; measure tick jitter and plan age | 3, 4 | Jetson |
 | 6 | Platform node for the car: camera, speed, steering estimate, range, PWM, watchdog | — | hardware, ROS 2 |
 | 7 | E-stop path independent of the Jetson; e-stop input to the supervisor | 6 | hardware, safety |

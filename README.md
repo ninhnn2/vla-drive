@@ -8,8 +8,9 @@ needed; everything runs in one Docker container on a PC.
 
 The aim is a Jetson Orin Nano Super driving with a fine-tuned VLA. Half of that is
 here: a SmolVLA fine-tuned on the simulator's episodes drives the simulated car from a
-PC; it has not run on a Jetson yet. The other policies are a scripted teacher, a
-classical lane follower and a 0.3 M-parameter network trained by the pipeline.
+PC, and runs on the Jetson with TensorRT in a C++ probe, but not yet inside the control
+loop there. The other policies are a scripted teacher, a classical lane follower and a
+0.3 M-parameter network trained by the pipeline.
 
 ```
 camera, speed ─► policy (slow, own thread) ─► chunk of [steer, throttle]
@@ -77,6 +78,17 @@ python tools/see_vla.py                 # where in the image it looks: its input
 python tools/vla_app.py                 # a web app at http://127.0.0.1:7860: an image in, the chunk out (needs gradio)
 ```
 
+On the Jetson, in C++ with TensorRT ([jetson/smolvla_trt](jetson/smolvla_trt/README.md)):
+`export.py` cuts the model into three ONNX graphs on the PC, `build_engines.sh` builds FP16
+engines on the board, and `vla_probe` shows each stage, from the task's tokens to the
+chunk, for any image, sentence and state.
+
+```bash
+python jetson/smolvla_trt/export.py     # on the PC -> runs/drive/vla/smolvla-v1-trt
+./build/vla_probe --model $M --check    # on the Jetson: against Python's numbers
+./build/vla_probe --model $M --image frame.png --interactive
+```
+
 ## What it shows
 
 Measured in the simulator; the details and the commands are in
@@ -96,6 +108,10 @@ Measured in the simulator; the details and the commands are in
   Hiding parts of the image shows that it steers by the road from 0.4 m ahead to the
   horizon, where its teacher aims. So the weave more likely comes from how precisely it
   answers than from where it looks.
+- On the Jetson Orin Nano Super, FP16 TensorRT engines compute the same chunk to within
+  0.002 of fp32 PyTorch, in 82 ms per inference (vision 25, prefix 9, ten denoising steps
+  43). Fine-tuned on one sentence, it ignores the sentence: "stop" and "turn left" barely
+  change the chunk; the image sets the steering and the speed the throttle.
 
 ## Layout
 
@@ -104,6 +120,7 @@ drive/          the simulator, policies, control loop, safety supervisor
 drive/learn/    the data pipeline: collect, label, validate, browse, train, evaluate, export, status
 ros/            ROS 2 nodes: the simulated car, the driver, teleop, the recorder
 tools/          probe_vla, see_vla, vla_app: study and debug a fine-tuned VLA
+jetson/         smolvla_trt: the fine-tuned SmolVLA in C++ with TensorRT, on the Jetson
 docs/study/     a study guide: 18 chapters with labs, a glossary and draw.io diagrams
 docker/         the container everything runs in; Makefile has the commands
 tests/          make test
@@ -112,8 +129,9 @@ runs/           datasets, models and reports (not in git)
 
 ## Not here yet
 
-A real car, a CARLA bridge, and a VLA on the Jetson. The fine-tuned SmolVLA runs in
-PyTorch on a PC; it has not been exported to TensorRT or run on a board. The simulator
+A real car, a CARLA bridge, and a VLA driving on the Jetson. The fine-tuned SmolVLA runs
+on the board with TensorRT, but only in the C++ probe: it is not yet a backend behind
+`BackendPolicy`, so the control loop on the Jetson does not use it. The simulator
 is flat and kinematic, so its numbers describe how the control loop behaves, not how a
 car will.
 

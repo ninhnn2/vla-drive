@@ -4,3 +4,4 @@ runs/
 ros/build/
 ros/install/
 ros/log/
+jetson/smolvla_trt/build/
