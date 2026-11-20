@@ -1,4 +1,4 @@
-"""A small web app to study and test a fine-tuned VLA (smolvla-v1): give it an image, see what it does.
+"""A small web app to study and test a fine-tuned VLA (smolvla-v1): give it an image or a video, see what it does.
 
     python tools/vla_app.py [--checkpoint smolvla-v1] [--port 7860]
 
@@ -17,6 +17,9 @@ what the model would do:
     the chunk      steering and throttle over the chunk, and where the attention goes
     model input    the 512 x 512 image SigLIP gets, and the attention on each image token
     occlusion      optional: which cells of the image move the steering (about 5 s)
+
+The Video tab runs the model on every frame of an episode or of any video file and writes an mp4 of
+what it would do (tools/vla_video.py, which also runs from the command line).
 
 docs/study/17-debugging-the-model.md explains the views; tools/see_vla.py draws them.
 """
@@ -309,49 +312,53 @@ def build(lab: Lab):
                     "the state or the input, then **Run the model**. "
                     "Steering +1 is full left. Views are explained in `docs/study/17-debugging-the-model.md`.")
         loaded = gr.State(None)
-        with gr.Row():
-            with gr.Column(scale=5):
-                with gr.Row():
-                    episode = gr.Dropdown(names, value=default_episode, label="episode", scale=2)
-                    frame = gr.Slider(0, 299, value=235, step=1, label="frame", scale=3)
-                    load_button = gr.Button("Load frame", scale=1)
-                note = gr.Markdown()
-                editor = gr.ImageEditor(label="input image: paint on it with the brush", type="numpy",
-                                        image_mode="RGB", format="png", sources=("upload", "clipboard", "webcam"),
-                                        brush=gr.Brush(colors=["#e6c21e", "#f0f0f0", "#46464b", "#3c8c3c", "#000000"],
-                                                       default_color="#e6c21e", default_size=6),
-                                        height=420)
-                with gr.Accordion("State, sentence, sampling", open=True):
+        with gr.Tab("Image"):
+            with gr.Row():
+                with gr.Column(scale=5):
                     with gr.Row():
-                        speed = gr.Slider(0.0, 3.0, value=1.35, step=0.05, label="speed (m/s)")
-                        steer = gr.Slider(-1.0, 1.0, value=0.0, step=0.01, label="wheels now (+ left)")
-                    task = gr.Textbox("drive along the track", label="task sentence")
-                    with gr.Row():
-                        seed = gr.Number(0, precision=0, label="noise seed")
-                        samples = gr.Slider(1, 16, value=4, step=1, label="samples (starting noises)")
-                        steps = gr.Slider(1, 20, value=lab.default_steps, step=1, label="denoising steps")
-                with gr.Accordion("Change the input (tests)", open=True):
-                    with gr.Row():
-                        fit = gr.Checkbox(True, label=f"resize to the camera's {CAMERA_W}x{CAMERA_H}")
-                        mirror = gr.Checkbox(False, label="mirror left-right")
-                        occlusion = gr.Checkbox(False, label="occlusion map (about 5 s)")
-                    with gr.Row():
-                        brightness = gr.Slider(0.2, 2.0, value=1.0, step=0.05, label="brightness")
-                        hide = gr.Dropdown(list(BANDS), value="nothing", label="hide a band of the image")
-                        fill = gr.Dropdown(["mean colour", "grey", "black"], value="mean colour",
-                                           label="fill each hidden cell with")
-                run = gr.Button("Run the model", variant="primary")
-            with gr.Column(scale=6):
-                path = gr.Image(label="where the chunk would take the car", type="numpy", format="png")
-                numbers = gr.Markdown()
-                chunk = gr.Image(label="the chunk, and where the attention goes", type="numpy", format="png")
-        with gr.Row():
-            model_input = gr.Image(label="model input: 512x512, 8x8 image tokens", type="numpy", format="png")
-            attention = gr.Image(label="attention on each image token (%)", type="numpy", format="png")
-            occluded = gr.Image(label="occlusion -> steering (red: more left, blue: more right)", type="numpy",
-                                format="png")
-        rows = gr.Dataframe(headers=["t (s)", "steer", "steer sd", "throttle", "teacher steer", "teacher throttle"],
-                            label="the chunk, step by step (mean over samples)")
+                        episode = gr.Dropdown(names, value=default_episode, label="episode", scale=2)
+                        frame = gr.Slider(0, 299, value=235, step=1, label="frame", scale=3)
+                        load_button = gr.Button("Load frame", scale=1)
+                    note = gr.Markdown()
+                    editor = gr.ImageEditor(label="input image: paint on it with the brush", type="numpy",
+                                            image_mode="RGB", format="png", sources=("upload", "clipboard", "webcam"),
+                                            brush=gr.Brush(colors=["#e6c21e", "#f0f0f0", "#46464b", "#3c8c3c", "#000000"],
+                                                           default_color="#e6c21e", default_size=6),
+                                            height=420)
+                    with gr.Accordion("State, sentence, sampling", open=True):
+                        with gr.Row():
+                            speed = gr.Slider(0.0, 3.0, value=1.35, step=0.05, label="speed (m/s)")
+                            steer = gr.Slider(-1.0, 1.0, value=0.0, step=0.01, label="wheels now (+ left)")
+                        task = gr.Textbox("drive along the track", label="task sentence")
+                        with gr.Row():
+                            seed = gr.Number(0, precision=0, label="noise seed")
+                            samples = gr.Slider(1, 16, value=4, step=1, label="samples (starting noises)")
+                            steps = gr.Slider(1, 20, value=lab.default_steps, step=1, label="denoising steps")
+                    with gr.Accordion("Change the input (tests)", open=True):
+                        with gr.Row():
+                            fit = gr.Checkbox(True, label=f"resize to the camera's {CAMERA_W}x{CAMERA_H}")
+                            mirror = gr.Checkbox(False, label="mirror left-right")
+                            occlusion = gr.Checkbox(False, label="occlusion map (about 5 s)")
+                        with gr.Row():
+                            brightness = gr.Slider(0.2, 2.0, value=1.0, step=0.05, label="brightness")
+                            hide = gr.Dropdown(list(BANDS), value="nothing", label="hide a band of the image")
+                            fill = gr.Dropdown(["mean colour", "grey", "black"], value="mean colour",
+                                               label="fill each hidden cell with")
+                    run = gr.Button("Run the model", variant="primary")
+                with gr.Column(scale=6):
+                    path = gr.Image(label="where the chunk would take the car", type="numpy", format="png")
+                    numbers = gr.Markdown()
+                    chunk = gr.Image(label="the chunk, and where the attention goes", type="numpy", format="png")
+            with gr.Row():
+                model_input = gr.Image(label="model input: 512x512, 8x8 image tokens", type="numpy", format="png")
+                attention = gr.Image(label="attention on each image token (%)", type="numpy", format="png")
+                occluded = gr.Image(label="occlusion -> steering (red: more left, blue: more right)", type="numpy",
+                                    format="png")
+            rows = gr.Dataframe(headers=["t (s)", "steer", "steer sd", "throttle", "teacher steer", "teacher throttle"],
+                                label="the chunk, step by step (mean over samples)")
+        with gr.Tab("Video"):
+            from tools.vla_video import video_tab
+            video_tab(lab, names, default_episode, Path("runs/debug/video"))
 
         loading = dict(fn=load, inputs=[episode, frame], outputs=[editor, speed, steer, loaded, note, frame])
         running = dict(fn=infer, inputs=[editor, loaded, speed, steer, task, seed, samples, steps, fit, mirror,

@@ -29,3 +29,26 @@ services:
     working_dir: /work
     stdin_open: true
     tty: true
+
+  # The LeRobot environment for SmolVLA (docker/vla): Python 3.12, PyTorch 2.11, LeRobot 0.5.2.
+  #   make vla-build | vla-check | vla-shell | vla-app
+  vla:
+    build: ./docker/vla
+    image: vla-drive:lerobot0.5.2-torch2.11
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    gpus: all
+    environment:
+      - HOME=/tmp               # a HOST_UID other than the image's user has no home in here
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
+    network_mode: host          # tools/vla_app.py at http://127.0.0.1:7860 on the host
+    shm_size: 8gb
+    volumes:
+      - .:/work
+      - hf:/hf
+    working_dir: /work
+    stdin_open: true
+    tty: true
+
+volumes:
+  hf:
+    name: vla-drive-hf          # SmolVLM2, shared with the dev container (.devcontainer)

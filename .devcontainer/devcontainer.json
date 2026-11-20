@@ -1,0 +1,35 @@
+// vla-drive in its LeRobot environment (docker/vla): SmolVLA, the simulator, the tools, the tests.
+// VS Code: "Dev Containers: Reopen in Container". docker/vla/README.md explains the setup and the checks.
+{
+  "name": "vla-drive (LeRobot, SmolVLA)",
+  "build": {
+    "dockerfile": "../docker/vla/Dockerfile",
+    "context": "../docker/vla"
+  },
+  // The same paths as `docker compose run vla`: the repository at /work, SmolVLM2 in the vla-drive-hf volume.
+  "workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
+  "workspaceFolder": "/work",
+  "mounts": [
+    "source=vla-drive-hf,target=/hf,type=volume"
+  ],
+  // The GPU when Docker can give it: VS Code adds --gpus all if `docker info` lists the NVIDIA runtime.
+  // If that runtime is declared but the toolkit is missing, the container fails to start: install the
+  // toolkit (docker/vla/README.md), or set "dev.containers.gpuAvailability": "none" to work on the CPU.
+  "hostRequirements": { "gpu": "optional" },
+  // PyTorch's DataLoader workers share memory through /dev/shm; Docker gives 64 MB by default.
+  "runArgs": ["--shm-size=8g"],
+  "remoteUser": "dev",
+  "updateRemoteUserUID": true,
+  "forwardPorts": [7860],
+  "portsAttributes": { "7860": { "label": "tools/vla_app.py" } },
+  "postCreateCommand": "python -c \"import torch, lerobot; print('torch', torch.__version__, 'CUDA', torch.cuda.is_available())\"",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-python.debugpy"],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.terminal.activateEnvironment": false
+      }
+    }
+  }
+}

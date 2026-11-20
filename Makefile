@@ -6,6 +6,8 @@ export HOST_GID := $(shell id -g)
 # Without a terminal (a script, CI) docker must not ask for one.
 RUN := docker compose run --rm $(shell [ -t 0 ] || echo -T) drive
 ROS := $(RUN) ros2 run drive_ros
+# The LeRobot environment for SmolVLA (docker/vla, also the VS Code dev container).
+VLA := docker compose run --rm $(shell [ -t 0 ] || echo -T) vla
 
 V ?= v1
 TRACK ?= peanut
@@ -14,7 +16,8 @@ NAME ?= ros
 ARGS ?=
 
 .PHONY: help build shell test gui sim collect label validate browse train evaluate status \
-        ros-build ros-sim ros-drive ros-teleop ros-record ros-launch ros-view
+        ros-build ros-sim ros-drive ros-teleop ros-record ros-launch ros-view \
+        vla-build vla-shell vla-check vla-test vla-app
 
 help:
 	@echo "container   make build | shell | test"
@@ -30,6 +33,7 @@ help:
 	@echo "              make ros-record [NAME=ros]           record the drive; Ctrl-C saves"
 	@echo "              make ros-view                        rqt_image_view on the camera"
 	@echo "            or all at once: make ros-launch [ARGS='policy:=cnn checkpoint:=v1 record:=true']"
+	@echo "SmolVLA     make vla-build, then: vla-check | vla-shell | vla-test | vla-app   (docker/vla/README.md)"
 
 build:
 	docker compose build drive
@@ -82,3 +86,22 @@ ros-launch: gui
 
 ros-view: gui
 	$(RUN) ros2 run rqt_image_view rqt_image_view /drive/image
+
+# ---- SmolVLA, in the LeRobot container (docker/vla) ----
+
+vla-build:
+	docker compose build vla
+
+vla-shell:
+	$(VLA) bash
+
+# The versions, the GPU, and the model on three frames against what it computed on the PC.
+vla-check:
+	$(VLA) python tools/check_env.py $(ARGS)
+
+vla-test:
+	$(VLA) python -m unittest discover -s tests -t .
+
+# Give the model an image or a video: http://127.0.0.1:7860
+vla-app:
+	$(VLA) python tools/vla_app.py $(ARGS)

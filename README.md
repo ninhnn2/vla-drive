@@ -59,7 +59,9 @@ and the learned policy need the container's PyTorch.
 ## The VLA
 
 A SmolVLA (about 450 M parameters) fine-tuned on the same episodes. It runs in a
-LeRobot environment outside the container, with that environment's Python and
+LeRobot environment (Python 3.12, so not the ROS 2 container): the image in
+[docker/vla](docker/vla/README.md), also a VS Code dev container (`make vla-build`,
+`make vla-check`, `make vla-shell`), or a local one with that environment's Python and
 `PYTHONPATH=.`. The setup and every flag are in Lab 15 of
 [docs/study/15-hands-on-labs.md](docs/study/15-hands-on-labs.md).
 
@@ -75,7 +77,11 @@ To study and debug it ([chapter 17](docs/study/17-debugging-the-model.md) of the
 ```bash
 python tools/probe_vla.py               # nine offline probes: accuracy per chunk step, noise, symmetry, timing
 python tools/see_vla.py                 # where in the image it looks: its input, attention, occlusion
-python tools/vla_app.py                 # a web app at http://127.0.0.1:7860: an image in, the chunk out (needs gradio)
+python tools/vla_app.py                 # a web app at http://127.0.0.1:7860: an image or a video in, what the model does out
+python tools/vla_video.py --video x.mp4  # the model on every frame of a video (or --episode): an annotated mp4 and a csv
+python tools/check_env.py               # is this environment right? versions, GPU, the model on three known frames
+python3 tools/fetch_bdd100k.py --count 5  # a few real driving videos from BDD100K (no 1.97 TB download)
+python3 tools/web_videos.py               # those videos upright, 640x360 H.264: examples in the app's Video tab
 ```
 
 On the Jetson, in C++ with TensorRT ([jetson/smolvla_trt](jetson/smolvla_trt/README.md)):
@@ -119,10 +125,11 @@ Measured in the simulator; the details and the commands are in
 drive/          the simulator, policies, control loop, safety supervisor
 drive/learn/    the data pipeline: collect, label, validate, browse, train, evaluate, export, status
 ros/            ROS 2 nodes: the simulated car, the driver, teleop, the recorder
-tools/          probe_vla, see_vla, vla_app: study and debug a fine-tuned VLA
+tools/          probe_vla, see_vla, vla_app, vla_video, check_env: study and debug a fine-tuned VLA
 jetson/         smolvla_trt: the fine-tuned SmolVLA in C++ with TensorRT, on the Jetson
 docs/study/     a study guide: 18 chapters with labs, a glossary and draw.io diagrams
-docker/         the container everything runs in; Makefile has the commands
+docker/         the containers: ROS 2 + PyTorch for drive/, and vla/ (LeRobot) for SmolVLA; Makefile has the commands
+.devcontainer/  VS Code in the LeRobot container
 tests/          make test
 runs/           datasets, models and reports (not in git)
 ```
