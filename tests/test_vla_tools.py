@@ -32,8 +32,9 @@ FRAMES = 12
 TASK = "drive along the track"
 
 
-def tiny_checkpoint(directory: Path) -> None:
-    """A SmolVLA checkpoint as lerobot-train writes one, for a 320x240 camera and [speed, steer] -> [steer, throttle]."""
+def tiny_checkpoint(directory: Path, state_width: int = 2) -> None:
+    """A SmolVLA checkpoint as lerobot-train writes one, for a 320x240 camera and [speed, steer] -> [steer, throttle]
+    ([speed] alone with `state_width` 1, as `export --state speed_mps` gives)."""
     import torch
     from lerobot.configs.types import FeatureType, PolicyFeature
     from lerobot.policies.factory import make_pre_post_processors
@@ -42,13 +43,14 @@ def tiny_checkpoint(directory: Path) -> None:
 
     config = SmolVLAConfig(
         input_features={"observation.images.front": PolicyFeature(FeatureType.VISUAL, (3, 240, 320)),
-                        "observation.state": PolicyFeature(FeatureType.STATE, (2,))},
+                        "observation.state": PolicyFeature(FeatureType.STATE, (state_width,))},
         output_features={"action": PolicyFeature(FeatureType.ACTION, (2,))},
         chunk_size=4, n_action_steps=4, num_steps=2, num_vlm_layers=2, resize_imgs_with_padding=(256, 256),
         load_vlm_weights=False, push_to_hub=False, device="cpu")
     torch.manual_seed(0)
     policy = SmolVLAPolicy(config)
-    stats = {"observation.state": {"mean": torch.tensor([1.3, 0.0]), "std": torch.tensor([0.26, 0.32])},
+    stats = {"observation.state": {"mean": torch.tensor([1.3, 0.0][:state_width]),
+                                   "std": torch.tensor([0.26, 0.32][:state_width])},
              "action": {"mean": torch.tensor([0.0, 0.18]), "std": torch.tensor([0.36, 0.12])},
              "observation.images.front": {"mean": torch.full((3, 1, 1), 0.45), "std": torch.full((3, 1, 1), 0.22)}}
     preprocess, postprocess = make_pre_post_processors(config, dataset_stats=stats)
@@ -160,7 +162,8 @@ class TinyVlaTests(unittest.TestCase):
     def test_the_app_answers_a_frame_and_an_upload(self):
         from tools.vla_app import AppError, Lab, answer, load_frame
         lab = Lab(self.project, "tiny")
-        editor, speed, steer, loaded, note, frame, last = load_frame(lab, "tiny-000", 50)
+        editor, speed, steer, loaded, note, frame, last, task = load_frame(lab, "tiny-000", 50)
+        self.assertEqual(task, TASK)                               # no meta.json: the simulator's sentence
         self.assertEqual((frame, last), (FRAMES - 1, FRAMES - 1))
         self.assertIn("teacher", note)
         views = answer(lab, editor, loaded, speed, steer, TASK, 0, 2, 2, True, True, 0.8,
@@ -185,6 +188,41 @@ class TinyVlaTests(unittest.TestCase):
             return
         from tools.vla_app import build
         self.assertIsNotNone(build(lab))                           # the page is built; it is not served
+
+    def test_the_app_debugs_a_carla_episode_with_a_speed_only_model(self):
+        from drive.carla.camera import CarlaCameraParams
+        from drive.carla.model import CarModel
+        from tools.vla_app import Lab, answer, load_frame
+        project = self.project / "carla"
+        checkpoint = project / "vla" / "tiny1" / "checkpoints" / "last" / "pretrained_model"
+        checkpoint.mkdir(parents=True)
+        tiny_checkpoint(checkpoint, state_width=1)
+        episode = project / "episodes" / "dagger1-town01-000"
+        tiny_episode(episode)
+        told = ["follow the lane"] * 6 + ["turn left at the next intersection"] * (FRAMES - 6)
+        data = dict(np.load(episode / "episode.npz"))
+        np.savez(episode / "episode.npz", **data, tasks=np.array(told), lateral_m=np.full(FRAMES, 0.8),
+                 teacher_driving=(np.arange(FRAMES) >= 8).astype(np.float32))
+        (episode / "meta.json").write_text(json.dumps({
+            "task": "follow the lane", "tasks": sorted(set(told)),
+            "carla": {"camera": CarlaCameraParams().to_json(), "vehicle": CarModel.load("vehicle.tesla.model3").to_json()}}))
+        lab = Lab(project, "tiny1")
+        self.assertEqual((lab.carla, lab.width, lab.played), (True, 1, 5))
+        editor, speed, steer, loaded, note, frame, last, task = load_frame(lab, "dagger1-town01-000", 9)
+        self.assertEqual(task, "turn left at the next intersection")            # this frame's, not the episode's
+        self.assertIn("the teacher was driving", note)
+        self.assertIn("+0.80 m", note)
+        views = answer(lab, editor, loaded, speed, steer, "turn right at the next intersection", 0, 2, 2, True,
+                       False, 1.0, "nothing", "mean colour", False)
+        self.assertEqual(views[0].shape[1], 640)
+        self.assertIn("not an input of this model", views[1])                    # given the speed alone
+        self.assertIn("first 5 actions", views[1])
+        try:
+            import gradio  # noqa: F401
+        except ImportError:
+            return
+        from tools.vla_app import build
+        self.assertIsNotNone(build(lab))
 
     def test_a_checkpoint_from_a_newer_lerobot_still_loads(self):
         from drive.policy.lerobot_backend import load_config

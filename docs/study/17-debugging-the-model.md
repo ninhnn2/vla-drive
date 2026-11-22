@@ -535,7 +535,12 @@ environment that added 15 packages (gradio 6.32) and changed none of the existin
 ```bash
 $V tools/vla_app.py                 # loads the model (about 10 s), then open http://127.0.0.1:7860
 $V tools/vla_app.py --open          # the same, and opens the browser
+$V tools/vla_app.py --project runs/carla --checkpoint smolvla-carla-v3-dagger2   # CARLA's episodes
 ```
+
+With a CARLA project each frame brings the sentence it was recorded with, the paths are
+drawn with that episode's camera and car, and a dropdown swaps the sentence for another
+maneuver ([CARLA](../carla.md#training-a-vla-on-it-and-testing-it)).
 
 It listens on this computer only. The image editor draws with WebGL, which every
 normal browser has. Headless Chrome without a GPU does not, and shows an empty editor.
