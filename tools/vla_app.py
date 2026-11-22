@@ -57,6 +57,7 @@ BANDS = {                                      # camera rows of a 320 x 240 fram
 STEPS_PLAYED = 4                               # chunk steps the executor plays before the next chunk ...
 STEPS_PLAYED_CARLA = 5                         # ... and in CARLA, at --replan-ms 500 (docs/carla.md)
 SIM_TASK, CARLA_TASK = "drive along the track", "follow the lane"
+ROAD = {False: "#46464b", True: "#999493"}     # the brush's road colour: the simulator's, CARLA's (near-road median)
 
 
 def read_meta(directory: Path) -> dict:
@@ -386,7 +387,7 @@ def build(lab: Lab):
                 note = gr.Markdown()
                 editor = gr.ImageEditor(label="input image: paint on it with the brush", type="numpy",
                                         image_mode="RGB", format="png", sources=("upload", "clipboard", "webcam"),
-                                        brush=gr.Brush(colors=["#e6c21e", "#f0f0f0", "#46464b", "#3c8c3c", "#000000"],
+                                        brush=gr.Brush(colors=["#e6c21e", "#f0f0f0", ROAD[lab.carla], "#3c8c3c", "#000000"],
                                                        default_color="#e6c21e", default_size=6),
                                         height=420)
                 with gr.Accordion("State, sentence, sampling", open=True):

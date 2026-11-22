@@ -208,6 +208,8 @@ class TinyVlaTests(unittest.TestCase):
             "carla": {"camera": CarlaCameraParams().to_json(), "vehicle": CarModel.load("vehicle.tesla.model3").to_json()}}))
         lab = Lab(project, "tiny1")
         self.assertEqual((lab.carla, lab.width, lab.played), (True, 1, 5))
+        from tools.vla_app import ROAD
+        self.assertEqual(ROAD[lab.carla], "#999493")                            # the brush paints CARLA's road
         editor, speed, steer, loaded, note, frame, last, task = load_frame(lab, "dagger1-town01-000", 9)
         self.assertEqual(task, "turn left at the next intersection")            # this frame's, not the episode's
         self.assertIn("the teacher was driving", note)
