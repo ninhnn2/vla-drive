@@ -29,9 +29,16 @@ class ChunkNet(nn.Module):
 
     def forward(self, images: torch.Tensor, states: torch.Tensor) -> torch.Tensor:
         """images: uint8 or float (B, H, W, 3) in 0..255; states: (B, 2) raw. -> (B, steps, 2)"""
-        x = images.permute(0, 3, 1, 2).float() / 255.0 - 0.5
+        # float before permute: on MPS (torch 2.5) casting a permuted uint8 view that starts
+        # inside its storage, such as batch[512:1024], ignores the offset and reads frame 0 on.
+        x = images.float().permute(0, 3, 1, 2) / 255.0 - 0.5
         states = states.float() * states.new_tensor([1.0 / SPEED_SCALE, 1.0])
         return self.head(torch.cat([self.vision(x), states], dim=1)).view(-1, self.steps, 2)
+
+
+def named_layers(model: ChunkNet) -> list[tuple[str, nn.Module]]:
+    """Every layer by the name probe and the training report use: vision.0 ... head.5."""
+    return [(f"vision.{i}", m) for i, m in enumerate(model.vision)] + [(f"head.{i}", m) for i, m in enumerate(model.head)]
 
 
 def save(path, model: ChunkNet, plan_dt: float, report: dict) -> None:

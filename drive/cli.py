@@ -9,11 +9,15 @@
 From drives to a network that drives (a project lives in runs/drive):
 
     ./drive.sh collect                 record the teacher, with disturbed steering
+    ./drive.sh collect --driver cnn --checkpoint v1 --name dag1    let v1 drive, the teacher labels (DAgger)
     ./drive.sh label                   label drives that came without a plan (ROS 2, a person)
     ./drive.sh validate                check the dataset
     ./drive.sh browse                  look at frames with their labels drawn on the road
-    ./drive.sh train v1                train a network (needs PyTorch: make train)
+    ./drive.sh lrfind                  which learning rates make the loss fall, in under a minute
+    ./drive.sh train v1                train a network (needs PyTorch: make train, or make setup)
     ./drive.sh evaluate v1             drive it on every track
+    ./drive.sh probe v1 report         look inside it: layers, history, training, errors, ablation, activations,
+                                       saliency, behaviour, onpolicy; or all of them as one HTML page
     ./drive.sh sim --policy cnn --checkpoint v1 --show
     ./drive.sh status                  what there is, and the next step
 
@@ -32,6 +36,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .episode import EpisodeConfig, run
+from .carla.cli import add_parser as add_carla_parser
 from .learn import STAGES
 from .learn.project import Project, add_project_argument
 from .policy import POLICIES
@@ -173,6 +178,7 @@ def main(argv=None) -> int:
 
     for stage in STAGES:
         stage.add_parser(commands)
+    add_carla_parser(commands)                      # ./drive.sh carla ...: needs the carla package only when run
 
     args = parser.parse_args(argv)
     if getattr(args, "duration_s", 1.0) <= 0:

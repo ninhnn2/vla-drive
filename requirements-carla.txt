@@ -1,0 +1,6 @@
+# The CARLA client for drive/carla (make carla-setup puts it in .venv-carla, Python 3.10).
+# Collecting needs no PyTorch. The carla wheel must come from the same CARLA build as the
+# server: PyPI's matches the stock carlasim/carla:0.9.16 image; for a server built from
+# source, point CARLA_WHEEL at its wheel instead (make carla-setup CARLA_WHEEL=...).
+numpy>=1.21,<2
+opencv-python>=4.5

@@ -60,6 +60,13 @@ class LoopConfig:
     #: Index a chunk by the time of its observation, skipping the actions that went
     #: stale while the model was computing. Off: play every chunk from its start.
     latency_compensation: bool = True
+    #: At least this long between two observations handed to the policy. 0: the next as soon
+    #: as the last chunk is back, so only a chunk's first step or two is ever played.
+    replan_s: float = 0.0
+    #: Average every chunk that still covers the moment (ACT's temporal ensembling) instead of
+    #: fading the newest in over `blend_s`; weights exp(-ensemble_k x rank), rank 0 the oldest.
+    ensemble: bool = False
+    ensemble_k: float = 0.0
 
     @property
     def dt(self) -> float:

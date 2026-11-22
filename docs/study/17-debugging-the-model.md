@@ -46,18 +46,46 @@ the left when a model is new (is the data what you think?).
 | **`tools/probe_vla.py`** | the model offline: accuracy per chunk step, noise, symmetry, sensitivity, timing, shapes | §3 |
 | **`tools/see_vla.py`** | where in the image the output comes from: the model's input, attention, occlusion | §3 |
 | **`tools/vla_app.py`** | a web app: one image in (a frame, an upload, your painting), the chunk out, drawn on the road | §3 |
+| **`./drive.sh probe`** | the same for the CNN: layers, training curves against the average plan, gradient norms and update/weight ratios per epoch, errors per step, road and speed against two baselines, input ablation, dead units, saliency, mirror, brightness, blank, speed and steering-state tests, the error on its own drives against the distance off-centre, and an HTML report of all of it | [docs/thuc-hanh, lessons 3, 4 and 7](../thuc-hanh/07-debug-chuyen-nghiep.md) |
+| `./drive.sh lrfind`, `collect --driver cnn` | the learning-rate range test; DAgger, the network driving while the teacher labels | [docs/thuc-hanh, lesson 7](../thuc-hanh/07-debug-chuyen-nghiep.md) |
 | `sim --show` debug panel | the chunk in use, the skipped part, the action played, model against motors | [Lab 1](15-hands-on-labs.md#lab-1-run-the-simulator) |
 | `sim --log actions.csv` | every 20 ms tick, for analysis afterwards | §4 |
 | `evaluate`, `sweep` | closed-loop results, latency sensitivity | chapters [11](11-model-evaluation.md), [5](05-action-chunking-and-latency.md) |
 | a debugger | stop inside any function, inspect tensors | §5 |
 
-All model-side commands run with the LeRobot environment, from the repository root:
+All model-side commands run in the LeRobot environment, from the repository root, the
+same way on Linux and on a Mac:
 
 ```bash
-export D=/home/fanning/data1/AI_SOURCE/smolvla-local HF_HOME=/home/fanning/data1/AI_SOURCE/smolvla-local/hf
-export V=$D/.venv/bin/python PYTHONPATH=.
-cd /home/fanning/data1/AI_SOURCE/vla-drive
+make vla-setup              # once: .venv-vla (Python 3.12, LeRobot 0.5.1, gradio), with uv
+export V=./vla.sh           # that environment's Python, with PYTHONPATH=. set
 ```
+
+- **Another environment.** `export VLA_VENV=/path/to/venv` makes `./vla.sh` use it. Lab 15's
+  environment, built from a LeRobot checkout (0.5.2), is where this chapter was first
+  measured. A checkpoint written by a newer LeRobot also loads in 0.5.1: `LeRobotBackend`
+  drops the config fields 0.5.1 does not know and names them (`pretrained_revision`).
+  Measured on `smolvla-v1` (2026-11-19, Linux, LeRobot 0.5.1, PyTorch 2.10):
+  - frame 235 steers −0.4874 against −0.488 on 0.5.2;
+  - the occlusion cells agree within 0.003;
+  - the nine probes print the outputs quoted below to within 0.002 (timing aside).
+- **Disk.** The first load downloads SmolVLM2 (about 1 GB) to `~/.cache/huggingface`. If
+  that disk is short of space, `export HF_HOME=/a/disk/with/room/hf`.
+- **Device.** The model runs on CUDA, else on a Mac's GPU (MPS), else on the CPU. Each
+  tool takes `--device`, or `VLA_DEVICE` for any command. Running one frame on two
+  devices checks that the GPU computes what the CPU does; that is how the MPS bug in
+  [docs/thuc-hanh, lesson 6](../thuc-hanh/06-debug-model.md) was found.
+  - Linux (RTX 4060 against its CPU): frame 235 with one noise steers −0.443 on CUDA and
+    −0.440 on the CPU, and the occlusion cells agree within 0.006. The CPU took 224 s for
+    that frame with its occlusion map, CUDA 2 s.
+  - Mac (M3, 10-core GPU, 16 GB), LeRobot 0.5.1: one chunk with 10 denoising steps takes
+    about 360 ms, `see_vla.py` about 30 s per frame with two noises, and the web app
+    answers in about 1 s. The whole route on a Mac, with outputs, is
+    [docs/thuc-hanh/08-vla-tren-mac.md](../thuc-hanh/08-vla-tren-mac.md).
+- **Tests.** `./vla.sh -m unittest tests.test_vla_tools` runs `probe_vla.py`,
+  `see_vla.py` and the web app's logic on a tiny untrained SmolVLA, built in seconds:
+  about 2 minutes on a CPU. CI runs it, and every other test, on Linux and on a Mac
+  (`.github/workflows/tests.yml`).
 
 ---
 
@@ -157,7 +185,7 @@ the pipeline (targets, normalisation, frozen parameters), not in the amount of d
 
 ```bash
 $V -m drive export --match 'sim-000' --out /tmp/one-episode
-$D/.venv/bin/lerobot-train --policy.path=lerobot/smolvla_base \
+$V lerobot-train --policy.path=lerobot/smolvla_base \
   --dataset.repo_id=local/one --dataset.root=/tmp/one-episode \
   --rename_map='{"observation.images.front": "observation.images.camera1"}' \
   --policy.chunk_size=16 --policy.n_action_steps=16 --batch_size=8 --steps=400 --log_freq=50 \
@@ -500,13 +528,19 @@ A tool that rules a cause out is as useful as one that finds it.
 
 The probes and `see_vla.py` answer fixed questions. [`tools/vla_app.py`](../../tools/vla_app.py)
 is a small web app for your own: give the model one image, change one thing, and see
-what it does. It needs gradio in the LeRobot environment, installed once. The install
-measured here added 15 packages (gradio 6.32) and changed none of the existing ones:
+what it does. It needs gradio, which `make vla-setup` installs. In another LeRobot
+environment, `uv pip install --python $VLA_VENV gradio` adds it. On this laptop's
+environment that added 15 packages (gradio 6.32) and changed none of the existing ones:
 
 ```bash
-UV_CACHE_DIR=$D/uv-cache uv pip install --python $V gradio
 $V tools/vla_app.py                 # loads the model (about 10 s), then open http://127.0.0.1:7860
+$V tools/vla_app.py --open          # the same, and opens the browser
+$V tools/vla_app.py --project runs/carla --checkpoint smolvla-carla-v3-dagger2   # CARLA's episodes
 ```
+
+With a CARLA project each frame brings the sentence it was recorded with, the paths are
+drawn with that episode's camera and car, and a dropdown swaps the sentence for another
+maneuver ([CARLA](../carla.md#training-a-vla-on-it-and-testing-it)).
 
 It listens on this computer only. The image editor draws with WebGL, which every
 normal browser has. Headless Chrome without a GPU does not, and shows an empty editor.
@@ -626,7 +660,7 @@ Change one component, keep the rest, and see whether the symptom moves with it:
 ### In VS Code
 
 Add a configuration to `.vscode/launch.json` that uses the LeRobot environment's
-Python, then set breakpoints in
+Python (`.venv-vla`, or your `VLA_VENV`), then set breakpoints in
 [`LeRobotBackend.infer`](../../drive/policy/lerobot_backend.py),
 [`ChunkExecutor.action`](../../drive/control/executor.py#L34) or
 [`SafetySupervisor.filter`](../../drive/safety.py#L33), or in LeRobot's
@@ -639,11 +673,11 @@ Python, then set breakpoints in
   "request": "launch",
   "module": "drive",
   "args": ["sim", "--policy", "vla", "--checkpoint", "smolvla-v1", "--latency-ms", "125", "--duration-s", "5"],
-  "python": "/home/fanning/data1/AI_SOURCE/smolvla-local/.venv/bin/python",
+  "python": "${workspaceFolder}/.venv-vla/bin/python",
   "cwd": "${workspaceFolder}",
   "env": {
     "PYTHONPATH": "${workspaceFolder}",
-    "HF_HOME": "/home/fanning/data1/AI_SOURCE/smolvla-local/hf",
+    "PYTORCH_ENABLE_MPS_FALLBACK": "1",
     "HF_HUB_OFFLINE": "1"
   },
   "justMyCode": false

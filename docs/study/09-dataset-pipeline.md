@@ -151,11 +151,16 @@ An episode of 300 frames is about 3.4 MB compressed (69 MB raw: the images domin
 | **Input** | none (the simulator) |
 | **Output** | `episodes/<name>-NNN/` with `episode.npz`, `meta.json` **and** `labels.npz` (source `teacher`) |
 | **Source** | [`collect`](../../drive/learn/collect.py#L120), [`Disturbance`](../../drive/learn/collect.py#L31), [`Recorder`](../../drive/recorder.py#L13) |
-| **CLI** | `./drive.sh collect [--project DIR] [--name sim] [--episodes 40] [--duration-s 30] [--tracks peanut] [--steer-noise 0.25] [--seed 0] [--show] [--video FILE]` |
+| **CLI** | `./drive.sh collect [--project DIR] [--name sim] [--episodes 40] [--duration-s 30] [--tracks peanut] [--speeds 0.9,1.8] [--steer-noise 0.25] [--seed 0] [--show] [--video FILE] [--driver teacher\|cnn --checkpoint V [--beta 0]]` |
 
 Per episode: choose track and direction; place the car at a random point, off-centre
-and askew; draw a target speed in 0.9–1.8 m/s; run at 50 Hz, sampling at 10 Hz. The
-defaults give 40 × 300 = 12 000 frames in about 35 s.
+and askew; draw a target speed in 0.9–1.8 m/s (`--speeds`; one value fixes it); run at
+50 Hz, sampling at 10 Hz. The defaults give 40 × 300 = 12 000 frames in about 35 s. The
+last line of the output counts the frames recorded with the car off the road; above 5 %
+it warns that the disturbance is stronger than the teacher can correct. With `--driver cnn
+--checkpoint v1` a trained network drives through the control loop and supervisor while the
+teacher labels every frame: DAgger (Ross et al. 2011), worked through in
+[docs/thuc-hanh, lesson 7](../thuc-hanh/07-debug-chuyen-nghiep.md).
 
 **What is recorded at each sample** (`recorder.add`): the time, the camera image, the
 state, the action applied on the *previous* tick, and the teacher's fresh plan
@@ -280,7 +285,7 @@ This is the stage that replaces annotation. Nobody draws labels; somebody must s
 | **Input** | all labelled, valid frames |
 | **Output** | `models/<version>.pt` and `models/<version>.json` |
 | **Source** | [`train`](../../drive/learn/train.py#L45); details in [chapter 10](10-model-training.md) |
-| **CLI** | `./drive.sh train VERSION [--project DIR] [--epochs 15] [--device DEVICE] [--seed 0]` (`DEVICE` is `cuda` or `cpu`) |
+| **CLI** | `./drive.sh train VERSION [--project DIR] [--epochs 15] [--batch 128] [--lr 0.001] [--no-augmentation] [--device DEVICE] [--seed 0]` (`DEVICE` is `cuda`, `mps` or `cpu`) |
 
 | Message | Cause |
 |---|---|
@@ -298,7 +303,7 @@ This is the stage that replaces annotation. Nobody draws labels; somebody must s
 | **Input** | model versions, checkpoint files, or `pure-pursuit` / `lane-camera` |
 | **Output** | `reports/<name>.json`, a per-drive table, a comparison; exit code 0 only if every drive of every model passed |
 | **Source** | [`evaluate`](../../drive/learn/evaluate.py#L22); details in [chapter 11](11-model-evaluation.md) |
-| **CLI** | `./drive.sh evaluate MODEL [MODEL …] [--project DIR] [--tracks peanut,oval,trefoil] [--duration-s 40] [--latency-ms 100]` |
+| **CLI** | `./drive.sh evaluate MODEL [MODEL …] [--project DIR] [--tracks peanut,oval,trefoil] [--duration-s 40] [--latency-ms 100] [--max-plan-age-ms 600]` |
 
 ### 7. `status`
 
@@ -319,10 +324,8 @@ project runs/drive
 
 `next_step` is a small state machine: no episodes → collect; unlabelled → label; no
 model → validate and train; unevaluated model → evaluate; otherwise, more data.
-
-> **Discrepancy to know about.** With no episodes, `next_step` suggests
-> `make ros-drive RECORD=1`. The Makefile has no `RECORD` variable. The working
-> commands are `make ros-record`, or `make ros-launch ARGS='record:=true'`.
+With no episodes it points at `collect`, or at `make ros-record` running beside
+`ros-sim` and `ros-drive` (or `make ros-launch ARGS='record:=true'`).
 
 ### 8. `export`
 

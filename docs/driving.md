@@ -31,8 +31,15 @@ make test
 make help                      # every target
 ```
 
-`./drive.sh` also runs straight on a PC that has numpy and OpenCV; only training and
-the learned policy need the container's PyTorch.
+On a Mac (Apple Silicon) the same targets run `drive/` natively instead, in a `.venv`
+that `make setup` makes with [uv](https://docs.astral.sh/uv/), and training uses the
+Mac's GPU through PyTorch's MPS backend. Docker on a Mac has no GPU, so the container
+([`compose.mac.yml`](../docker/compose.mac.yml)) is only for ROS 2: arm64, PyTorch for the
+CPU, windows on XQuartz. `NATIVE=0` runs `drive/` in it too; `NATIVE=1` uses `.venv` on
+Linux.
+
+`./drive.sh` also runs straight on a PC that has numpy and OpenCV, and picks up `.venv`
+when there is one; only training and the learned policy need PyTorch.
 
 ```bash
 ./drive.sh sim --latency-ms 400 --max-plan-age-ms 1500 --video runs/slow.mp4
@@ -63,6 +70,7 @@ the car. Without them the run is as fast as the PC allows and repeats exactly.
 | [`learn/`](../drive/learn) | the data pipeline, one module per stage: collect, label, validate, browse, train, evaluate, status |
 | [`policy/cnn.py`](../drive/policy/cnn.py) | drives with a network trained by `learn/` |
 | [`platform.py`](../drive/platform.py) | what the loop needs from a car: the seam for ROS 2, CARLA or hardware |
+| [`carla/`](../drive/carla) | CARLA as a platform, and episodes recorded in its towns: [carla.md](carla.md) |
 | [`ros/src/drive_ros`](../ros/src/drive_ros) | ROS 2 nodes: the simulated car, the control loop, a recorder, a teleop window |
 | [`docker/`](../docker), [`Makefile`](../Makefile) | the container and the commands that run in it |
 | [`config.py`](../drive/config.py) | every number: the car, the camera, the limits |
@@ -121,7 +129,7 @@ ROS 2 ───┘                                      ▲          │
 make collect                # the teacher drives 40 times in the simulator: 12 000 frames, ~35 s
 make validate               # is the dataset complete, consistent, varied enough?
 make browse                 # every frame, with its label drawn on the road
-make train V=v1             # ~20 s on an RTX 4060
+make train V=v1             # ~20 s on an RTX 4060, ~2 min on an M3 (MPS), ~10 min on its CPU
 make evaluate V=v1          # drive it on every track, both ways
 make sim ARGS='--policy cnn --checkpoint v1 --track trefoil'
 make status                 # what the project holds, and the next step
@@ -234,7 +242,8 @@ recorder and the training pipeline do not change. Neither exists yet.
 
 Each `make` target is its own container on the host's network, so the nodes find one
 another; `ROS_LOCALHOST_ONLY=1` keeps them off the LAN. Windows (OpenCV, rqt, rviz2)
-open on the host's X server.
+open on the host's X server; on a Mac, on XQuartz, which the containers reach over TCP
+(`make gui` checks that it lets them).
 
 ## From here to a car
 
@@ -253,7 +262,8 @@ open on the host's X server.
    with the PyTorch model (`drive/policy/lerobot_backend.py`); a TensorRT backend has
    not been wired in, and nothing has run on a Jetson.
 
-Not here yet: the real platform, a CARLA bridge, a VLA on the Jetson. (A SmolVLA
+Not here yet: the real platform, a VLA trained well enough to drive CARLA (recording in
+CARLA, and `carla drive` to test a VLA there, are in [carla.md](carla.md)), a VLA on the Jetson. (A SmolVLA
 fine-tuned on the episodes drives the simulator on a PC: docs/study, Lab 15.) Driving by hand with `teleop` has been started and seen to open its
 window, not driven for a recording. The simulator is flat and kinematic: no slip, no camera noise or exposure,
 obstacles are painted on the ground. Treat its numbers as how the loop behaves, not as

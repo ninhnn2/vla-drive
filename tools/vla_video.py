@@ -167,8 +167,10 @@ def frame_view(lab: Lab, image, t, result, plan, strip, stats, source) -> np.nda
     lines = [f"steering {steer:+.2f}  throttle {throttle:+.2f}  (spread {result['spread']:.3f})",
              f"state: speed {result['speed']:.2f} m/s, wheels {result['steer']:+.2f}"]
     if stats is not None:
-        z = [(v - float(stats["mean"][k])) / float(stats["std"][k]) for k, v in enumerate((result["speed"], result["steer"]))]
-        lines.append(f"normalised: speed {z[0]:+.1f} sd, wheels {z[1]:+.1f} sd" + ("  OUTSIDE TRAINING" if max(map(abs, z)) > 3 else ""))
+        values = (result["speed"], result["steer"])[:len(stats["mean"])]    # [speed] alone: export --state speed_mps
+        z = [(v - float(stats["mean"][k])) / float(stats["std"][k]) for k, v in enumerate(values)]
+        lines.append("normalised: " + ", ".join(f"{name} {v:+.1f} sd" for name, v in zip(("speed", "wheels"), z))
+                     + ("  OUTSIDE TRAINING" if max(map(abs, z)) > 3 else ""))
     if plan is not None:
         lines.append(f"teacher steering {plan[:STEPS_PLAYED, 0].mean():+.2f}  throttle {plan[:STEPS_PLAYED, 1].mean():+.2f}")
     lines.append(f"{result['ms']:.0f} ms for this frame")

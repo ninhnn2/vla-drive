@@ -4,4 +4,7 @@ runs/
 ros/build/
 ros/install/
 ros/log/
+.venv/
+.venv-vla/
+.venv-carla/
 jetson/smolvla_trt/build/

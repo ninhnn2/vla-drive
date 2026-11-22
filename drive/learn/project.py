@@ -48,8 +48,11 @@ class Project:
         for path in (self.vla(str(ref)), Path(ref)):
             if (path / "config.json").is_file():
                 return path
+        have = self.versions() + sorted(d.name for d in (self.home / "vla").glob("*")
+                                        if (self.vla(d.name) / "config.json").is_file())
         raise ValueError(f"no model {ref!r}: not a version in {self.home / 'models'} or {self.home / 'vla'}, "
-                         "not a file, and not a LeRobot checkpoint directory")
+                         "not a file, and not a LeRobot checkpoint directory. "
+                         + (f"There are: {', '.join(have)}" if have else "There is none yet: train one first"))
 
     @staticmethod
     def policy_for(checkpoint: Path) -> str:

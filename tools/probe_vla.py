@@ -28,7 +28,7 @@ import numpy as np
 
 from drive.learn.label import episodes, read_labels
 from drive.learn.project import Project
-from drive.policy.lerobot_backend import LeRobotBackend
+from drive.policy.lerobot_backend import LeRobotBackend, synchronize
 from drive.policy.vla import BackendObservation
 
 
@@ -43,6 +43,11 @@ def chunk(backend, image, speed, steer, task="drive along the track", noise=None
     return backend.infer(observation(backend, image, speed, steer, task, noise)).chunk[:, :2]
 
 
+def shown_steps(steps: int) -> list[int]:
+    """The chunk steps a probe prints: 0, 1, 2, 3, 5, 10, 15 for smolvla-v1's 16, fewer or more for other chunks."""
+    return [k for k in (0, 1, 2, 3, 5, 10, 15, 25, 49) if k < steps]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--project", type=Path, default=Path("runs/drive"))
@@ -51,13 +56,14 @@ def main() -> int:
                         help="held-out episodes (LeRobot's eval_split=0.1 holds out the last 9: sim2-031 … sim2-039)")
     parser.add_argument("--every", type=int, default=10, help="use every Nth frame of each episode")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--device", help="cuda, mps or cpu (default: the fastest there is; or $VLA_DEVICE)")
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
     checkpoint = Project(args.project).checkpoint(args.checkpoint)
     started = time.perf_counter()
-    backend = LeRobotBackend(checkpoint)
-    print(f"loaded {checkpoint} in {time.perf_counter() - started:.1f} s; chunk {backend.config.chunk_size}, "
+    backend = LeRobotBackend(checkpoint, args.device)
+    print(f"loaded {checkpoint} on {backend.device} in {time.perf_counter() - started:.1f} s; chunk {backend.config.chunk_size}, "
           f"{backend.config.num_steps} denoising steps, camera key {backend.camera!r}")
 
     found = [e for e in episodes(args.project / "episodes") if fnmatch(e.name, args.episodes)]
@@ -72,14 +78,19 @@ def main() -> int:
         for i in range(0, n - steps, args.every):
             a = chunk(backend, data["images"][i], *data["states"][i], rng=rng)
             for k in range(steps):
-                vs_plan[k].append(abs(a[k, 0] - plans[i, k, 0]))           # the teacher's clean plan from frame i
+                if k < plans.shape[1]:                                      # a plan has 16 steps, a chunk any number
+                    vs_plan[k].append(abs(a[k, 0] - plans[i, k, 0]))       # the teacher's clean plan from frame i
                 vs_target[k].append(abs(a[k, 0] - plans[i + k, 0, 0]))     # what LeRobot trained it to output
             firsts.append((a[0, 0], plans[i, 0, 0]))
             sample = sample or (data["images"][i], *data["states"][i], plans[i])
+    if not firsts:
+        raise SystemExit(f"no frame to probe: the episodes need more than {steps} frames (the chunk size)")
+    shown = shown_steps(steps)
+    mean = lambda errors: f"{np.mean(errors):5.3f}" if errors else "    -"
     print(f"\n[offline] {len(firsts)} frames from {len(found)} held-out episodes: mean |steer error| by chunk step")
-    print("  step:          " + " ".join(f"{k:5d}" for k in (0, 1, 2, 3, 5, 10, 15)))
-    print("  vs clean plan: " + " ".join(f"{np.mean(vs_plan[k]):5.3f}" for k in (0, 1, 2, 3, 5, 10, 15)))
-    print("  vs LeRobot's target: " + " ".join(f"{np.mean(vs_target[k]):5.3f}" for k in (0, 1, 2, 3, 5, 10, 15)))
+    print("  step:          " + " ".join(f"{k:5d}" for k in shown))
+    print("  vs clean plan: " + " ".join(mean(vs_plan[k]) for k in shown))
+    print("  vs LeRobot's target: " + " ".join(mean(vs_target[k]) for k in shown))
     model, teacher = np.array(firsts).T
     print(f"  step 0: correlation with the teacher {np.corrcoef(model, teacher)[0, 1]:.3f}; "
           f"mean steer model {model.mean():+.3f}, teacher {teacher.mean():+.3f}")
@@ -88,7 +99,8 @@ def main() -> int:
     runs = np.array([chunk(backend, image, speed, steer, rng=rng) for _ in range(10)])
     spread = runs[:, :, 0].std(axis=0)
     print(f"\n[noise] one frame, 10 different noises: std of steering by step "
-          f"{' '.join(f'{spread[k]:.3f}' for k in (0, 1, 5, 10, 15))}; std of throttle at step 0 {runs[:, 0, 1].std():.3f}")
+          f"{' '.join(f'{spread[k]:.3f}' for k in shown if k != 2 and k != 3)}; "
+          f"std of throttle at step 0 {runs[:, 0, 1].std():.3f}")
 
     fixed = rng.standard_normal((1, steps, backend.config.max_action_dim)).astype(np.float32)
     once, again = chunk(backend, image, speed, steer, noise=fixed), chunk(backend, image, speed, steer, noise=fixed)
@@ -117,11 +129,11 @@ def main() -> int:
     for n in (1, 10):
         backend.policy.config.num_steps = n
         chunk(backend, image, speed, steer, noise=fixed)                       # warm up
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        synchronize(torch, backend.device)
         t0 = time.perf_counter()
         for _ in range(10):
             chunk(backend, image, speed, steer, noise=fixed)
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
+        synchronize(torch, backend.device)
         timings[n] = (time.perf_counter() - t0) / 10
     backend.policy.config.num_steps = 10
     per_step = (timings[10] - timings[1]) / 9

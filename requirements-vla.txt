@@ -1,0 +1,4 @@
+# The fine-tuned VLA: LeRobot and the web app, in .venv-vla (Python 3.12). `make vla-setup`.
+# 0.5.1 is the release nearest the 0.5.2 checkout the study guide's Lab 15 fine-tuned with.
+lerobot[smolvla]==0.5.1
+gradio
