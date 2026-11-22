@@ -117,6 +117,27 @@ times an M3 takes.
   `./vla.sh -m unittest tests.test_vla_tools` checks a setup in about 2 minutes without
   a checkpoint.
 
+## CARLA
+
+`drive/carla` makes CARLA a platform for the same loop and pipeline: a teacher drives
+random routes through a town, is told where to turn ("take the next left"), and its
+drives become episodes with a sentence per frame, for a SmolVLA that follows directions.
+It runs against the stock `carlasim/carla:0.9.16` image; the client has its own
+`.venv-carla`. Everything, with what was measured, is in [docs/carla.md](docs/carla.md).
+
+```bash
+make carla-setup                          # once: .venv-carla (Python 3.10, the carla wheel)
+make carla-server TOWN=Town01             # the server in Docker, booted into one town
+make carla-collect ARGS='--episodes 40 --show'   # -> runs/carla/episodes, watched in a window
+make carla-down
+```
+
+A plan in those labels lands within 0.19 m of where the car really goes 1.5 s later
+(median; 0.32 m at the 90th percentile), measured by `./drive.sh carla check`. Recorded
+so far: Town01, Town03_Opt and Town05_Opt, 120 drives, 72 000 frames, every drive to its
+end; it exports to LeRobot and SmolVLA trains on it. In the multi-lane towns the lane
+still decides which way a car can turn (lane changes are next).
+
 ## What it shows
 
 Measured in the simulator; the details and the commands are in
@@ -142,6 +163,7 @@ Measured in the simulator; the details and the commands are in
 ```
 drive/          the simulator, policies, control loop, safety supervisor
 drive/learn/    the data pipeline: collect, label, validate, browse, train, evaluate, export, status
+drive/carla/    CARLA as a platform: the car model, the route teacher, identify, check, collect
 ros/            ROS 2 nodes: the simulated car, the driver, teleop, the recorder
 tools/          probe_vla, see_vla, vla_app: study and debug a fine-tuned VLA
 docs/study/     a study guide: 18 chapters with labs, a glossary and draw.io diagrams
@@ -155,7 +177,8 @@ runs/           datasets, models and reports (not in git)
 
 ## Not here yet
 
-A real car, a CARLA bridge, and a VLA on the Jetson. The fine-tuned SmolVLA runs in
+A real car, a VLA trained to drive CARLA well (recording, training and `carla drive` to test it are in
+docs/carla.md; only a 300-step check has been run through them), and a VLA on the Jetson. The fine-tuned SmolVLA runs in
 PyTorch on a PC; it has not been exported to TensorRT or run on a board. The simulator
 is flat and kinematic, so its numbers describe how the control loop behaves, not how a
 car will.

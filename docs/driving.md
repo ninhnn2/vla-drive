@@ -70,6 +70,7 @@ the car. Without them the run is as fast as the PC allows and repeats exactly.
 | [`learn/`](../drive/learn) | the data pipeline, one module per stage: collect, label, validate, browse, train, evaluate, status |
 | [`policy/cnn.py`](../drive/policy/cnn.py) | drives with a network trained by `learn/` |
 | [`platform.py`](../drive/platform.py) | what the loop needs from a car: the seam for ROS 2, CARLA or hardware |
+| [`carla/`](../drive/carla) | CARLA as a platform, and episodes recorded in its towns: [carla.md](carla.md) |
 | [`ros/src/drive_ros`](../ros/src/drive_ros) | ROS 2 nodes: the simulated car, the control loop, a recorder, a teleop window |
 | [`docker/`](../docker), [`Makefile`](../Makefile) | the container and the commands that run in it |
 | [`config.py`](../drive/config.py) | every number: the car, the camera, the limits |
@@ -261,7 +262,8 @@ open on the host's X server; on a Mac, on XQuartz, which the containers reach ov
    with the PyTorch model (`drive/policy/lerobot_backend.py`); a TensorRT backend has
    not been wired in, and nothing has run on a Jetson.
 
-Not here yet: the real platform, a CARLA bridge, a VLA on the Jetson. (A SmolVLA
+Not here yet: the real platform, a VLA trained well enough to drive CARLA (recording in
+CARLA, and `carla drive` to test a VLA there, are in [carla.md](carla.md)), a VLA on the Jetson. (A SmolVLA
 fine-tuned on the episodes drives the simulator on a PC: docs/study, Lab 15.) Driving by hand with `teleop` has been started and seen to open its
 window, not driven for a recording. The simulator is flat and kinematic: no slip, no camera noise or exposure,
 obstacles are painted on the ground. Treat its numbers as how the loop behaves, not as

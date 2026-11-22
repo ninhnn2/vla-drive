@@ -75,6 +75,27 @@ def load_config(checkpoint: Path, log=print):
         return PreTrainedConfig.from_pretrained(directory)
 
 
+def state_width(checkpoint: Path) -> int | None:
+    """How many numbers of state the checkpoint was trained on, from its normalizer's statistics.
+    Not config.json: fine-tuned from smolvla_base, its input_features stay the base's (an arm, 6).
+    None: no statistics to say (the state is passed whole)."""
+    for path in sorted(Path(checkpoint).glob("policy_preprocessor_step_*_normalizer_processor.safetensors")):
+        from safetensors.numpy import load_file
+        stats = load_file(str(path))
+        if "observation.state.mean" in stats:
+            return int(stats["observation.state.mean"].shape[0])
+    return None
+
+
+def fit_state(state: np.ndarray, width: int | None) -> np.ndarray:
+    """The first `width` of the state `[speed_mps, steer]`: what the checkpoint was trained on.
+    `drive export --state speed_mps` trains a model on the speed alone (drive/learn/export.py)."""
+    width = len(state) if width is None else width
+    if width > len(state):
+        raise ValueError(f"the checkpoint wants a state of {width}, the observation has {len(state)}")
+    return np.ascontiguousarray(state[:width], dtype=np.float32)
+
+
 class LeRobotBackend:
     """`infer(observation)` -> an object whose `.chunk` is `(chunk_size, action_dim)`, in robot units."""
 
@@ -100,6 +121,7 @@ class LeRobotBackend:
             preprocessor_overrides={"device_processor": {"device": self.device}})
         self.config = self.policy.config
         self.camera = self._camera_key()
+        self.state_width = state_width(checkpoint)
 
     def _camera_key(self) -> str:
         """The key to put the camera image under, before the preprocessor renames it."""
@@ -113,7 +135,8 @@ class LeRobotBackend:
     def infer(self, obs):
         torch, started = self.torch, time.perf_counter()
         image = torch.from_numpy(np.ascontiguousarray(obs.images[0])).permute(2, 0, 1).float() / 255.0
-        batch = self.preprocess({self.camera: image, "observation.state": torch.from_numpy(obs.state),
+        state = torch.from_numpy(fit_state(obs.state, self.state_width))
+        batch = self.preprocess({self.camera: image, "observation.state": state,
                                  "task": obs.task})
         noise = torch.from_numpy(obs.noise[:, : self.config.chunk_size, : self.config.max_action_dim])
         actions = self.policy.predict_action_chunk(batch, noise=noise.to(self.device))

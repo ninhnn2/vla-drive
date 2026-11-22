@@ -6,3 +6,4 @@ ros/install/
 ros/log/
 .venv/
 .venv-vla/
+.venv-carla/

@@ -35,6 +35,7 @@ copy cả khối lệnh, dán vào terminal rồi so kết quả của mình v�
 | [6 · Debug model](06-debug-model.md) | khoanh vùng lỗi, bảng triệu chứng → nguyên nhân → lệnh, các bug thật đã gặp trong dự án | 40 phút |
 | [7 · Debug và tối ưu như dân chuyên nghiệp](07-debug-chuyen-nghiep.md) | bản đồ các phương pháp; LR range test; gradient, update/weight, unit chết; ablation; sai số on-policy; DAgger; báo cáo HTML | 60 phút |
 | [8 · Chạy và debug VLA (SmolVLA) trên MacBook](08-vla-tren-mac.md) | môi trường LeRobot; fine-tune trên GPU Mac; `probe_vla`, `see_vla`, `vla_app`; so sánh MPS với CPU; lỗi riêng của Mac | 45 phút, cộng khoảng 2 giờ train |
+| [9 · Thu dữ liệu cho SmolVLA trong CARLA](09-thu-du-lieu-carla.md) | server CARLA trong Docker; mô hình xe và độ chính xác nhãn; câu lệnh theo từng frame; `--show`, `--resume`; export, train; kiểm model offline (`probe_vla_carla`) và lái thật (`carla drive`); tìm lỗi server bằng cách đổi từng biến; hai điểm yếu của dữ liệu | 90 phút, cộng khoảng 1 giờ thu và 1 giờ train |
 
 Nên học theo thứ tự. Bài 4 và 5 dùng model `v1` train ở bài 3.
 

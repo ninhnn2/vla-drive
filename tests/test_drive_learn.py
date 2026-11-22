@@ -406,6 +406,44 @@ class ExportTests(unittest.TestCase):
             self.assertGreater(np.abs(labels["plans"][1:, 0, 0] - data["actions"][1:, 0]).mean(), 0.02)
             self.assertEqual(export.features((240, 320, 3))[export.CAMERA]["shape"], (240, 320, 3))
 
+    def test_the_state_can_leave_out_the_steer(self):
+        with tempfile.TemporaryDirectory() as d:
+            episode = small_dataset(Path(d), episodes=1, duration_s=2.0) / "sim-000"
+            data = np.load(episode / "episode.npz")
+            _, rows = export.frames(episode, state=("speed_mps",))
+            np.testing.assert_allclose([r["observation.state"] for r in rows], data["states"][:, :1])
+            self.assertEqual(export.features((240, 320, 3), ("speed_mps",))["observation.state"],
+                             {"dtype": "float32", "shape": (1,), "names": ["speed_mps"]})
+            for wrong in (("steer",), (), ("speed_mps", "steer", "yaw")):
+                with self.assertRaisesRegex(ValueError, "--state must be"):
+                    export.frames(episode, state=wrong)
+        from drive.policy.lerobot_backend import fit_state
+        state = np.array([4.0, 0.2], np.float32)
+        np.testing.assert_array_equal(fit_state(state, 1), [4.0])
+        np.testing.assert_array_equal(fit_state(state, 2), state)
+        with self.assertRaisesRegex(ValueError, "wants a state of 3"):
+            fit_state(state, 3)
+        np.testing.assert_array_equal(fit_state(state, None), state)
+
+    def test_match_takes_several_patterns(self):
+        self.assertTrue(export.matches("dagger1-town01-003", "carla3-*, dagger1-*"))
+        self.assertTrue(export.matches("carla3-town01-003", "carla3-*,dagger1-*"))
+        self.assertFalse(export.matches("carla-town01-003", "carla3-*,dagger1-*"))
+
+    def test_the_state_width_comes_from_the_normalizer_not_config_json(self):
+        try:
+            from safetensors.numpy import save_file
+        except ImportError:
+            self.skipTest("needs safetensors")
+        from drive.policy.lerobot_backend import state_width
+        with tempfile.TemporaryDirectory() as d:
+            checkpoint = Path(d)
+            (checkpoint / "config.json").write_text('{"input_features": {"observation.state": {"shape": [6]}}}')
+            self.assertIsNone(state_width(checkpoint))
+            save_file({"observation.state.mean": np.zeros(1, np.float32), "action.mean": np.zeros(2, np.float32)},
+                      str(checkpoint / "policy_preprocessor_step_5_normalizer_processor.safetensors"))
+            self.assertEqual(state_width(checkpoint), 1)
+
     def test_frames_refuse_unlabelled_and_unsteady_episodes(self):
         with tempfile.TemporaryDirectory() as d:
             episode = manual_drive(Path(d) / "manual")

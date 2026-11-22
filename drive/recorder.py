@@ -14,24 +14,32 @@ class Recorder:
     """Samples a drive at `hz` and writes one episode directory.
 
         episode.npz   t (N,)  images (N, H, W, 3) uint8 RGB  states (N, 2)  actions (N, 2)
-        meta.json     the task, the rate, what the columns mean
+                      tasks (N,) str: only when what the driver is told changes during the drive
+        meta.json     the task, the rate, what the columns mean, and `meta` (where it was recorded)
         labels.npz    only when a teacher gave a plan with every frame (learn/label.py)
 
     The arrays line up by index: `images[i]` and `states[i]` were seen at `t[i]`, and
     `actions[i]` was on the motors then. That is the content of one LeRobot episode.
+    `task` is the episode's sentence; a frame given its own (`add(..., task=)`, CARLA's
+    "turn left at the next intersection") overrides it.
     """
 
-    def __init__(self, directory: Path, task: str, hz: float = 10.0):
+    def __init__(self, directory: Path, task: str, hz: float = 10.0, meta: dict | None = None):
         self.directory, self.task, self.hz = Path(directory), task, hz
+        self.meta = dict(meta or {})
         self._next = 0.0
-        self.t, self.images, self.states, self.actions, self.plans = [], [], [], [], []
+        self.t, self.images, self.states, self.actions, self.plans, self.tasks = [], [], [], [], [], []
+        self.extras: dict[str, list] = {}
         self.plan_dt: float | None = None
 
     def due(self, t: float) -> bool:
         """True when it is time for the next sample."""
         return t >= self._next - 1e-9
 
-    def add(self, t: float, image: np.ndarray, speed: float, steer: float, action, plan=None) -> None:
+    def add(self, t: float, image: np.ndarray, speed: float, steer: float, action, plan=None,
+            task: str | None = None, extra: dict | None = None) -> None:
+        """`extra` holds more per-frame columns (CARLA's pose); saved as arrays of their own, which
+        training and export do not read."""
         self._next += 1.0 / self.hz
         if self._next <= t:                      # after a pause, carry on from now
             self._next = t + 1.0 / self.hz
@@ -39,21 +47,40 @@ class Recorder:
         self.images.append(image)
         self.states.append([speed, steer])
         self.actions.append(np.asarray(action, dtype=np.float32))
+        self.tasks.append(self.task if task is None else task)
+        for name, value in (extra or {}).items():
+            self.extras.setdefault(name, []).append(value)
         if plan is not None:
             self.plans.append(plan.actions)
             self.plan_dt = plan.dt
+
+    def truncate(self, frames: int) -> None:
+        """Drop the last `frames` samples (the moments before a crash, say)."""
+        keep = max(len(self.t) - frames, 0)
+        for column in (self.t, self.images, self.states, self.actions, self.tasks, self.plans, *self.extras.values()):
+            del column[keep:]
 
     def save(self) -> Path:
         if self.plans and len(self.plans) != len(self.t):
             raise ValueError("a plan must come with every frame or with none")
         self.directory.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(self.directory / "episode.npz", t=np.array(self.t, np.float32),
-                            images=np.array(self.images, np.uint8), states=np.array(self.states, np.float32),
-                            actions=np.array(self.actions, np.float32))
+        arrays = dict(t=np.array(self.t, np.float32), images=np.array(self.images, np.uint8),
+                      states=np.array(self.states, np.float32), actions=np.array(self.actions, np.float32))
+        if any(len(column) != len(self.t) for column in self.extras.values()):
+            raise ValueError("an extra column must come with every frame")
+        reserved = {"t", "images", "states", "actions", "tasks"} & set(self.extras)
+        if reserved:
+            raise ValueError(f"extra columns cannot be named {sorted(reserved)}")
+        arrays.update({name: np.array(column, np.float32) for name, column in self.extras.items()})
+        changes = any(task != self.task for task in self.tasks)
+        if changes:
+            arrays["tasks"] = np.array(self.tasks, dtype=str)
+        np.savez_compressed(self.directory / "episode.npz", **arrays)
         (self.directory / "meta.json").write_text(json.dumps({
             "task": self.task, "fps": self.hz, "frames": len(self.t),
+            **({"tasks": sorted(set(self.tasks))} if changes else {}),
             "state": ["speed_mps", "steer"], "action": ["steer", "throttle"],
-            "image": "uint8 HxWx3 RGB"}, indent=2) + "\n")
+            "image": "uint8 HxWx3 RGB", **self.meta}, indent=2) + "\n")
         if self.plans:
             write_labels(self.directory, np.array(self.plans), np.ones(len(self.t), bool), self.plan_dt, "teacher")
         return self.directory

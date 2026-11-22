@@ -5,6 +5,7 @@ A FAIL means training on it would be wrong or impossible; a WARN is worth a look
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +19,9 @@ def check_episode(path: Path) -> tuple[list[tuple[str, str]], dict | None]:
     try:
         data = np.load(path / "episode.npz")
         t, images, states, actions = (data[k] for k in ("t", "images", "states", "actions"))
-        fps = json.loads((path / "meta.json").read_text())["fps"]
+        meta = json.loads((path / "meta.json").read_text())
+        fps = meta["fps"]
+        tasks = [str(task) for task in data["tasks"]] if "tasks" in data.files else [meta["task"]] * len(t)
     except (OSError, KeyError, ValueError) as error:
         return [("FAIL", f"cannot be read: {error}")], None
 
@@ -26,6 +29,8 @@ def check_episode(path: Path) -> tuple[list[tuple[str, str]], dict | None]:
     if not (len(images) == len(states) == len(actions) == n) or n < 2:
         return [("FAIL", f"arrays differ in length or are too short: t {n}, images {len(images)}, "
                          f"states {len(states)}, actions {len(actions)}")], None
+    if len(tasks) != n:
+        problems.append(("FAIL", f"{len(tasks)} tasks for {n} frames"))
     if images.dtype != np.uint8 or images.ndim != 4 or images.shape[-1] != 3:
         problems.append(("FAIL", f"images must be uint8 (N, H, W, 3), got {images.dtype} {images.shape}"))
     if not (np.isfinite(states).all() and np.isfinite(actions).all() and np.isfinite(t).all()):
@@ -56,7 +61,7 @@ def check_episode(path: Path) -> tuple[list[tuple[str, str]], dict | None]:
         problems.append(("FAIL", "labels do not match the recording, or hold an action outside [-1, 1]"))
         labels = None
     return problems, {"frames": n, "seconds": float(t[-1] - t[0]), "image": images.shape[1:],
-                      "speed": states[:, 0], "steer": actions[:, 0], "labels": labels}
+                      "speed": states[:, 0], "steer": actions[:, 0], "labels": labels, "tasks": tasks}
 
 
 def validate(directory: Path, log=print) -> dict:
@@ -89,7 +94,8 @@ def validate(directory: Path, log=print) -> dict:
                        "straight": round(100 * float((np.abs(steer) <= 0.1).mean())),
                        "right": round(100 * float((steer < -0.1).mean()))},
             labelled_frames=sum(int(l["valid"].sum()) for l in labelled),
-            label_sources=sorted({l["source"] for l in labelled}))
+            label_sources=sorted({l["source"] for l in labelled}),
+            tasks=dict(Counter(task for m in measured for task in m["tasks"]).most_common()))
         if len(summary["image"]) > 1:
             whole("FAIL", f"episodes differ in image size: {summary['image']}")
         if len({(l["plans"].shape[1], l["dt"]) for l in labelled}) > 1:
@@ -118,6 +124,10 @@ def validate(directory: Path, log=print) -> dict:
         log(f"  steering   left {steer_pct['left']} %, straight {steer_pct['straight']} %, right {steer_pct['right']} %")
         log(f"  labels     {summary['labelled_frames']} usable frames"
             + (f", from {' and '.join(summary['label_sources'])}" if summary["label_sources"] else ""))
+        if len(summary["tasks"]) > 1:
+            log(f"  tasks      {len(summary['tasks'])} sentences; frames per sentence:")
+            for task, count in summary["tasks"].items():
+                log(f"               {100 * count / summary['frames']:5.1f} %  {task}")
     for level, message in sorted(problems):
         log(f"  {level}  {message}")
     log("dataset: " + ("FAILED" if failures else "ok" + (f", {len(warnings)} warning(s)" if warnings else "")))

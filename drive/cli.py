@@ -36,6 +36,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .episode import EpisodeConfig, run
+from .carla.cli import add_parser as add_carla_parser
 from .learn import STAGES
 from .learn.project import Project, add_project_argument
 from .policy import POLICIES
@@ -177,6 +178,7 @@ def main(argv=None) -> int:
 
     for stage in STAGES:
         stage.add_parser(commands)
+    add_carla_parser(commands)                      # ./drive.sh carla ...: needs the carla package only when run
 
     args = parser.parse_args(argv)
     if getattr(args, "duration_s", 1.0) <= 0:
