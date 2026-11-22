@@ -17,9 +17,12 @@ class ChunkExecutor:
     on arrival and the car acts on a plan that is one latency out of date.
     """
 
-    def __init__(self, blend_s: float = 0.10, latency_compensation: bool = True):
+    def __init__(self, blend_s: float = 0.10, latency_compensation: bool = True, ensemble: bool = False,
+                 ensemble_k: float = 0.0):
         self.blend_s = blend_s
         self.latency_compensation = latency_compensation
+        self.ensemble, self.ensemble_k = ensemble, ensemble_k
+        self._live: list[tuple[ActionChunk, float]] = []   # with ensemble: the chunks, oldest first
         self.chunk: ActionChunk | None = None
         self._origin = 0.0                     # the time chunk.actions[0] is played at
         self._previous: tuple[ActionChunk, float] | None = None
@@ -30,11 +33,20 @@ class ChunkExecutor:
             self._previous = (self.chunk, self._origin)
         self.chunk, self._swapped = chunk, now
         self._origin = chunk.t_obs if self.latency_compensation else now
+        if self.ensemble:
+            self._live = [(c, o) for c, o in self._live if now - o < len(c.actions) * c.dt]
+            self._live.append((chunk, self._origin))
 
     def action(self, now: float) -> np.ndarray | None:
         """The action for `now`, or None when there is no plan or it has run out."""
         if self.chunk is None:
             return None
+        if self.ensemble:
+            found = [a for a in (c.sample(now - o) for c, o in self._live) if a is not None]
+            if not found:
+                return None
+            weights = np.exp(-self.ensemble_k * np.arange(len(found)))
+            return np.average(np.asarray(found, dtype=np.float64), axis=0, weights=weights)
         action = self.chunk.sample(now - self._origin)
         fade = (now - self._swapped) / self.blend_s if self.blend_s > 0 else 1.0
         if action is not None and fade < 1.0 and self._previous is not None:

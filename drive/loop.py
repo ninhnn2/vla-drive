@@ -27,15 +27,20 @@ class DriveLoop:
                  config: LoopConfig = LoopConfig()):
         self.platform, self.worker, self.config = platform, worker, config
         self.safety = safety
-        self.executor = ChunkExecutor(config.blend_s, config.latency_compensation)
+        self.executor = ChunkExecutor(config.blend_s, config.latency_compensation, config.ensemble,
+                                      config.ensemble_k)
+        self._asked = -float("inf")          # when the last observation went to the policy
 
-    def step(self) -> Tick:
+    def step(self, task: str | None = None) -> Tick:
+        """One tick. `task` is the sentence for an observation taken now (default: the config's);
+        in CARLA it changes as the car nears a junction."""
         platform, now = self.platform, self.platform.t
         chunk = self.worker.poll(now)
         if chunk is not None:
             self.executor.update(chunk, now)
-        if not self.worker.busy:
-            self.worker.submit(platform.observe(self.config.task), now)
+        if not self.worker.busy and now - self._asked >= self.config.replan_s - 1e-9:
+            self.worker.submit(platform.observe(self.config.task if task is None else task), now)
+            self._asked = now
 
         command = self.executor.action(now)
         distance = platform.range_m()
