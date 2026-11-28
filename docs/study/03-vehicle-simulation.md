@@ -1,5 +1,7 @@
 # 03 · Vehicle simulation
 
+*[Tiếng Việt](03-vehicle-simulation.vi.md)*
+
 Everything in this chapter is **[SIM-ONLY]** by definition, and **[TESTED]** by
 `TrackTests`, `VehicleTests` and `WorldTests` in [`tests/test_drive.py`](../../tests/test_drive.py).
 

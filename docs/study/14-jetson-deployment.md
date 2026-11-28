@@ -1,5 +1,7 @@
 # 14 · Jetson Orin Nano deployment
 
+*[Tiếng Việt](14-jetson-deployment.vi.md)*
+
 > **Status of this whole chapter: [PROPOSED].** Nothing in this repository has run on
 > a Jetson or on a real car. The PC side has moved: the episodes can be exported to a
 > LeRobotDataset, and a SmolVLA fine-tuned on them drives the simulator in PyTorch on

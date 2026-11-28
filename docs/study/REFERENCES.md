@@ -1,5 +1,7 @@
 # References
 
+*[Tiếng Việt](REFERENCES.vi.md)*
+
 Every link was requested on 2026-11-16 and answered, and every arXiv identifier was
 checked against the paper's title, except the entries marked †: those hosts refused
 or timed out for an automated request, so the address is given from memory and should

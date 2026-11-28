@@ -1,5 +1,7 @@
 # 04 · Driving policies
 
+*[Tiếng Việt](04-driving-policies.vi.md)*
+
 ## What problem are we solving?
 
 A policy answers one question: *given what the car senses now, what should it do for

@@ -1,5 +1,7 @@
 # 17 · Debugging the model and the algorithm
 
+*[Tiếng Việt](17-debugging-the-model.vi.md)*
+
 How to find out *why* a learned driving policy behaves as it does, with the tools in
 this repository and LeRobot. Every output quoted below was produced for this guide on
 2026-11-17 with the fine-tuned SmolVLA `smolvla-v1` of

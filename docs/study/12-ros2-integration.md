@@ -1,5 +1,7 @@
 # 12 · ROS 2 integration
 
+*[Tiếng Việt](12-ros2-integration.vi.md)*
+
 **[TESTED]** by [`tests/test_drive_ros.py`](../../tests/test_drive_ros.py) (skipped
 without ROS 2; run `make test` in the container). The car behind the topics is the
 simulator: **[SIM-ONLY]**.

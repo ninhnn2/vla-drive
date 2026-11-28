@@ -1,5 +1,7 @@
 # 00 · Learning roadmap
 
+*[Tiếng Việt](00-learning-roadmap.vi.md)*
+
 ## What this project is, in one paragraph
 
 A vision-language-action model (VLA) looks at a camera image, takes about a tenth of a

@@ -1,5 +1,7 @@
 # 01 · System architecture
 
+*[Tiếng Việt](01-system-architecture.vi.md)*
+
 ## What problem are we solving?
 
 Two parts of a self-driving system run on incompatible clocks.

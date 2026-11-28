@@ -1,5 +1,7 @@
 # Glossary
 
+*[Tiếng Việt](GLOSSARY.vi.md)*
+
 Terms as they are used in this repository. Each entry gives a definition, where the
 idea lives in the code, and the chapter that teaches it.
 

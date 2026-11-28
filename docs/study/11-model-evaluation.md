@@ -1,5 +1,7 @@
 # 11 · Model evaluation
 
+*[Tiếng Việt](11-model-evaluation.vi.md)*
+
 Everything here is **[SIM-ONLY]**: the metrics need ground truth that only a
 simulator has. **[TESTED]** by `EvaluateTests` and `DriveTests`.
 

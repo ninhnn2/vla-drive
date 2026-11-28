@@ -1,5 +1,7 @@
 # 10 · Model training
 
+*[Tiếng Việt](10-model-training.vi.md)*
+
 **[TESTED]** by `LearnTests` in [`tests/test_drive_learn.py`](../../tests/test_drive_learn.py#L481)
 (skipped when PyTorch is absent; run `make test` in the container).
 

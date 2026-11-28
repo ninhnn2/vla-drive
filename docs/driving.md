@@ -1,5 +1,7 @@
 # Driving
 
+*[Tiếng Việt](driving.vi.md)*
+
 `drive/` is a small driving stack built around a policy that answers slowly and in
 chunks, which is what a VLA is: SmolVLA takes about 100 ms on the Orin Nano and returns
 50 future actions. It runs on a PC with numpy and OpenCV, against a simulated 1:10 car.

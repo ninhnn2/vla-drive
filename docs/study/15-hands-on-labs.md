@@ -1,5 +1,7 @@
 # 15 · Hands-on labs
 
+*[Tiếng Việt](15-hands-on-labs.vi.md)*
+
 Fifteen exercises, in order of dependence. Each takes 15 to 45 minutes, except Lab 15
 (about an hour, most of it waiting).
 

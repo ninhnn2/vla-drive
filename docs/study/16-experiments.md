@@ -1,5 +1,7 @@
 # 16 · Experiments and engineering analysis
 
+*[Tiếng Việt](16-experiments.vi.md)*
+
 The labs of [chapter 15](15-hands-on-labs.md) show how the stack behaves. The
 experiments here ask *why*, in a form you can reuse: a hypothesis that could turn out
 false, one variable changed at a time, a command, a measurement, and what the result

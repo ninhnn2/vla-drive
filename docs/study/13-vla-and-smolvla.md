@@ -1,5 +1,7 @@
 # 13 · VLA and SmolVLA
 
+*[Tiếng Việt](13-vla-and-smolvla.vi.md)*
+
 > **Read this first.** Since 2026-11-17 a SmolVLA fine-tuned on this project's
 > episodes drives the simulated car, on a laptop GPU, in PyTorch: the episodes are
 > exported with `export`, fine-tuned with LeRobot's `lerobot-train`, and run through

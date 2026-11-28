@@ -1,5 +1,7 @@
 # 06 · Control theory
 
+*[Tiếng Việt](06-control-theory.vi.md)*
+
 Only the control theory this project needs, each idea tied to the line that embodies it.
 
 ## What problem are we solving?

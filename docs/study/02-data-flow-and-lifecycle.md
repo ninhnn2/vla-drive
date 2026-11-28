@@ -1,5 +1,7 @@
 # 02 · Data flow and execution lifecycle
 
+*[Tiếng Việt](02-data-flow-and-lifecycle.vi.md)*
+
 ## What problem are we solving?
 
 Knowing the boxes of the architecture is not enough to debug it. You need to know, for

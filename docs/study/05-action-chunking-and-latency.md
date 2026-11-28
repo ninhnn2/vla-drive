@@ -1,5 +1,7 @@
 # 05 · Action chunking and latency compensation
 
+*[Tiếng Việt](05-action-chunking-and-latency.vi.md)*
+
 This is the chapter the project is built around. Everything in it is implemented in
 two small files, [`drive/types.py`](../../drive/types.py) and
 [`drive/control/executor.py`](../../drive/control/executor.py), and **[TESTED]** by

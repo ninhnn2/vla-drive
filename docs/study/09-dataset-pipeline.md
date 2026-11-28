@@ -1,5 +1,7 @@
 # 09 · Dataset pipeline
 
+*[Tiếng Việt](09-dataset-pipeline.vi.md)*
+
 ## What problem are we solving?
 
 Between "a car drove" and "a network drives" there are several steps, and a mistake in

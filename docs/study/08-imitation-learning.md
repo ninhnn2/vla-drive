@@ -1,5 +1,7 @@
 # 08 · Imitation learning fundamentals
 
+*[Tiếng Việt](08-imitation-learning.vi.md)*
+
 ## What problem are we solving?
 
 Writing a driving policy by hand works when you can state the rule (pure pursuit) and

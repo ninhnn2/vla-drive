@@ -1,5 +1,7 @@
 # vla-drive
 
+*[Tiếng Việt](README.vi.md)*
+
 A small self-driving stack for learning, built around the way a vision-language-action
 (VLA) model answers: slowly, and with a chunk of future actions. It has a simulated
 1:10 car, a 50 Hz control loop with a safety supervisor, a data pipeline that takes

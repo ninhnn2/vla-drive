@@ -1,5 +1,7 @@
 # 07 · Safety supervisor
 
+*[Tiếng Việt](07-safety-supervisor.vi.md)*
+
 ## What problem are we solving?
 
 A learned policy will be wrong sometimes, slow sometimes, and absent sometimes (a

@@ -1,5 +1,7 @@
 # Study guide: the vla-drive driving stack
 
+*[Tiếng Việt](README.vi.md)*
+
 A curriculum built from this repository's own code. Each chapter teaches one idea
 (theory first, then the lines that implement it), and ends with an experiment you can
 run and questions you should be able to answer.

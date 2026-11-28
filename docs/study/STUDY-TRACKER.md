@@ -1,5 +1,7 @@
 # Study tracker
 
+*[Tiếng Việt](STUDY-TRACKER.vi.md)*
+
 Copy this file, or edit it in place, and keep it honest. A chapter is done when you
 can answer its knowledge check without looking and have run its experiment, not when
 you have read it.
